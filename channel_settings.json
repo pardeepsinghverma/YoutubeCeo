@@ -1,0 +1,20 @@
+{
+  "channel_name": "Lil Kido Stories",
+  "logo_path": "C:\\ReactNative\\Personal\\uploader\\branding\\channel_logo.png",
+  "show_logo": true,
+  "logo_position": "top_right",
+  "logo_size": 120,
+  "logo_opacity": 0.95,
+  "show_outro": true,
+  "outro_text_template": "Watch next part on {channel_name}",
+  "outro_duration_sec": 4,
+  "schedule_frequency": "daily",
+  "schedule_interval_days": 3,
+  "shorts_schedule_times": [
+    "17:00"
+  ],
+  "long_schedule_times": [
+    "19:30"
+  ],
+  "schedule_start_days_ahead": 1
+}

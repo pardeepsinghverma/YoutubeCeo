@@ -1,0 +1,95 @@
+# ==============================================================================
+# Git Ignore Configuration - YouTube AI Auto-Publisher Platform
+# ==============================================================================
+
+# --- Secrets & Environment Configurations ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Python & Bytecode ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Virtual Environments ---
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# --- Browser Profiles & Automation User Data (Playwright / Chrome) ---
+chrome_profile/
+chrome_profiles/
+user_data/
+
+# --- Local Databases & Data Stores ---
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+videos.db
+
+# --- Generated Processing Directories ---
+temp_audio/
+shorts_output/
+thumbnails/
+scratch/
+
+# --- Runtime Logs ---
+*.log
+upload_logs.json
+upload_execution.log
+
+# --- Temporary Subtitles & ASS Files ---
+*.ass
+temp_*
+
+# --- Root-level Debug Screenshots, Frames & Temporary Media ---
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
+/*.mp4
+/*.mp3
+/*.html
+error_upload.png
+
+# --- Keep Required Branding & Test Assets ---
+!branding/
+!branding/**
+!test_videos/
+!test_videos/**
+
+# --- IDE & OS Files ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
