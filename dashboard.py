@@ -44,20 +44,35 @@ WORKER_STATE = {
 }
 
 @app.get("/api/system-status")
-def get_system_status():
-    chrome_profile_exists = (CHROME_PROFILE_DIR / "Default").exists() or len(list(CHROME_PROFILE_DIR.glob("*"))) > 5
+def get_system_status(channel_id: Optional[int] = None):
+    from db import get_active_channel, get_all_channels
+    from channel_manager import check_channel_youtube_cookies
+    active_ch = get_active_channel()
+    channels = get_all_channels()
+    target_ch = None
+    if channel_id and channel_id != 0:
+        target_ch = next((c for c in channels if c["id"] == channel_id), None)
+    if not target_ch:
+        target_ch = active_ch
+    
+    prof_dir = target_ch["profile_dir"] if target_ch else str(CHROME_PROFILE_DIR)
+    is_yt_auth = check_channel_youtube_cookies(prof_dir)
     gemini_connected = bool(os.getenv("GEMINI_API_KEY", "") or GEMINI_API_KEY)
     
+    stats_ch_id = channel_id if channel_id is not None else (active_ch["id"] if active_ch else None)
+    
     return {
-        "youtube_authenticated": chrome_profile_exists,
+        "youtube_authenticated": is_yt_auth,
         "gemini_connected": gemini_connected,
         "worker": WORKER_STATE,
-        "stats": get_stats()
+        "stats": get_stats(channel_id=stats_ch_id if stats_ch_id != 0 else None),
+        "active_channel": active_ch,
+        "channels_count": len(channels)
     }
 
 @app.get("/api/videos")
-def get_videos(filter: Optional[str] = None, video_type: Optional[str] = None, parent_id: Optional[int] = None):
-    videos = get_videos_by_status(status=filter if filter != "ALL" else None, video_type=video_type, parent_id=parent_id)
+def get_videos(filter: Optional[str] = None, video_type: Optional[str] = None, parent_id: Optional[int] = None, channel_id: Optional[int] = None):
+    videos = get_videos_by_status(status=filter if filter != "ALL" else None, video_type=video_type, parent_id=parent_id, channel_id=channel_id if channel_id != 0 else None)
     return videos
 
 @app.get("/api/logs")
@@ -186,6 +201,7 @@ def api_generate_thumbnail(payload: dict):
         raise HTTPException(status_code=404, detail="Video not found")
 
     v = dict(row)
+    req_ch_id = payload.get("channel_id") or v.get("channel_id")
     res = generate_thumbnail_image(
         video_id=v["id"],
         video_path=Path(v["file_path"]),
@@ -194,7 +210,8 @@ def api_generate_thumbnail(payload: dict):
         is_short=bool(v["is_short"]),
         part_number=v.get("part_number"),
         force_ai=force_ai,
-        custom_prompt=custom_prompt
+        custom_prompt=custom_prompt,
+        channel_id=req_ch_id
     )
 
     if not res or not res.exists():
@@ -214,28 +231,34 @@ def api_generate_all_thumbnails(payload: dict, background_tasks: BackgroundTasks
     return {"message": f"AI Thumbnail generation started for {target_type}"}
 
 @app.get("/api/channel-settings")
-def api_get_channel_settings():
-    cfg = get_channel_settings()
+def api_get_channel_settings(channel_id: Optional[int] = None):
+    cfg = get_channel_settings(channel_id=channel_id)
     custom_logo_exists = bool(cfg.get("logo_path") and Path(cfg["logo_path"]).is_file())
     default_logo_exists = (BASE_DIR / "branding" / "default_logo.png").is_file()
     return {
         "settings": cfg,
         "has_logo": custom_logo_exists or default_logo_exists,
-        "is_custom_logo": custom_logo_exists
+        "is_custom_logo": custom_logo_exists,
+        "channel_id": cfg.get("channel_id")
     }
 
 @app.post("/api/channel-settings")
 def api_save_channel_settings(payload: dict):
-    updated = save_channel_settings(payload)
-    return {"message": "Channel & branding settings saved successfully!", "settings": updated}
+    channel_id = payload.get("channel_id")
+    updated = save_channel_settings(payload, channel_id=channel_id)
+    return {"message": f"Settings saved for channel '{updated.get('channel_name')}'!", "settings": updated}
 
 @app.post("/api/upload-logo")
-async def api_upload_logo(file: UploadFile = File(...)):
+async def api_upload_logo(file: UploadFile = File(...), channel_id: Optional[int] = None):
     ext = Path(file.filename).suffix.lower()
     if ext not in [".png", ".jpg", ".jpeg", ".webp"]:
         raise HTTPException(status_code=400, detail="Invalid image format. Please upload a PNG, JPG, or WEBP image.")
     
-    target_path = BRANDING_DIR / f"channel_logo{ext}"
+    from db import get_channel_by_id, get_active_channel
+    target_ch = get_channel_by_id(channel_id) if channel_id else get_active_channel()
+    cid = target_ch["id"] if target_ch else 1
+
+    target_path = BRANDING_DIR / f"channel_logo_{cid}{ext}"
     content = await file.read()
     with open(target_path, "wb") as f:
         f.write(content)
@@ -243,9 +266,9 @@ async def api_upload_logo(file: UploadFile = File(...)):
     updated = save_channel_settings({
         "logo_path": str(target_path),
         "show_logo": True
-    })
+    }, channel_id=cid)
     return {
-        "message": "Channel logo uploaded successfully!",
+        "message": f"Channel logo uploaded successfully for {target_ch.get('channel_name', 'channel')}!",
         "logo_path": str(target_path),
         "settings": updated
     }
@@ -254,24 +277,30 @@ async def api_upload_logo(file: UploadFile = File(...)):
 def api_upload_logo_base64(payload: dict):
     b64_data = payload.get("image_base64", "")
     filename = payload.get("filename", "channel_logo.png")
+    channel_id = payload.get("channel_id")
     ext = Path(filename).suffix.lower() or ".png"
     if ext not in [".png", ".jpg", ".jpeg", ".webp"]:
         ext = ".png"
     if "," in b64_data:
         b64_data = b64_data.split(",")[1]
     raw_bytes = base64.b64decode(b64_data)
-    target_path = BRANDING_DIR / f"channel_logo{ext}"
+
+    from db import get_channel_by_id, get_active_channel
+    target_ch = get_channel_by_id(channel_id) if channel_id else get_active_channel()
+    cid = target_ch["id"] if target_ch else 1
+
+    target_path = BRANDING_DIR / f"channel_logo_{cid}{ext}"
     with open(target_path, "wb") as f:
         f.write(raw_bytes)
     updated = save_channel_settings({
         "logo_path": str(target_path),
         "show_logo": True
-    })
+    }, channel_id=cid)
     return {"message": "Channel logo uploaded successfully!", "logo_path": str(target_path), "settings": updated}
 
 @app.get("/api/logo-image")
-def api_get_logo_image():
-    cfg = get_channel_settings()
+def api_get_logo_image(channel_id: Optional[int] = None):
+    cfg = get_channel_settings(channel_id=channel_id)
     lp = cfg.get("logo_path", "")
     if lp and Path(lp).is_file():
         return FileResponse(str(Path(lp)))
@@ -279,6 +308,92 @@ def api_get_logo_image():
     if def_p.is_file():
         return FileResponse(str(def_p))
     raise HTTPException(status_code=404, detail="No logo image found")
+
+# -------------------------------------------------------------
+# MULTI-CHANNEL & MULTI-ACCOUNT MANAGEMENT ENDPOINTS
+# -------------------------------------------------------------
+
+@app.get("/api/channels")
+def api_get_channels():
+    from db import get_all_channels, get_active_channel
+    channels = get_all_channels()
+    active = get_active_channel()
+    return {"channels": channels, "active_channel": active}
+
+@app.post("/api/channels/create")
+def api_create_channel(payload: dict):
+    from channel_manager import create_channel_with_profile
+    channel_name = payload.get("channel_name", "").strip()
+    if not channel_name:
+        raise HTTPException(status_code=400, detail="Channel name cannot be empty")
+    handle = payload.get("handle", "").strip()
+    thumbnail_style = payload.get("thumbnail_style", "3D Pixar Animation")
+    thumbnail_mood = payload.get("thumbnail_mood", "Joyful, safe, playful, magical, full of adventure")
+    schedule_freq = payload.get("schedule_frequency", "daily")
+    interval_days = int(payload.get("schedule_interval_days", 1))
+    shorts_times = payload.get("shorts_schedule_times", ["11:00", "17:00"])
+    long_times = payload.get("long_schedule_times", ["19:30"])
+    
+    new_ch = create_channel_with_profile(
+        channel_name=channel_name,
+        handle=handle,
+        thumbnail_style=thumbnail_style,
+        thumbnail_mood=thumbnail_mood,
+        schedule_frequency=schedule_freq,
+        schedule_interval_days=interval_days,
+        shorts_schedule_times=shorts_times,
+        long_schedule_times=long_times
+    )
+    return {"message": f"Channel '{channel_name}' created successfully!", "channel": new_ch}
+
+@app.post("/api/channels/{channel_id}/login")
+def api_channel_login(channel_id: int):
+    from channel_manager import launch_channel_login_window
+    try:
+        res = launch_channel_login_window(channel_id)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/channels/{channel_id}/verify")
+def api_channel_verify(channel_id: int):
+    from channel_manager import verify_channel_session
+    try:
+        res = verify_channel_session(channel_id)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/channels/{channel_id}/set-active")
+def api_set_active_channel(channel_id: int):
+    from db import set_active_channel
+    act = set_active_channel(channel_id)
+    return {"message": f"Active channel switched to '{act['channel_name']}'", "channel": act}
+
+@app.post("/api/channels/{channel_id}/update")
+def api_update_channel(channel_id: int, payload: dict):
+    from db import update_channel
+    updated = update_channel(channel_id, **payload)
+    return {"message": "Channel updated successfully", "channel": updated}
+
+@app.delete("/api/channels/{channel_id}")
+def api_delete_channel(channel_id: int):
+    from db import delete_channel
+    try:
+        delete_channel(channel_id)
+        return {"message": f"Channel #{channel_id} removed"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/assign-videos-channel")
+def api_assign_videos_channel(payload: dict):
+    from db import assign_videos_to_channel
+    video_ids = payload.get("video_ids", [])
+    channel_id = payload.get("channel_id")
+    if not video_ids or not channel_id:
+        raise HTTPException(status_code=400, detail="Missing video_ids or channel_id")
+    count = assign_videos_to_channel(video_ids, int(channel_id))
+    return {"message": f"Assigned {count} video(s) to Channel #{channel_id}"}
 
 def bg_scan_folder(folder_path: str):
     global WORKER_STATE
@@ -366,13 +481,14 @@ def api_schedule_plan(payload: dict):
     overwrite = payload.get("overwrite_existing", True)
     parent_id = payload.get("parent_id")
     video_ids = payload.get("video_ids")
+    channel_id = payload.get("channel_id")
 
-    # Persist frequency preferences
+    # Persist frequency preferences for this channel
     save_channel_settings({
         "schedule_frequency": freq,
         "schedule_interval_days": interval,
         "shorts_schedule_times": time_slots
-    })
+    }, channel_id=channel_id)
 
     assigned = assign_schedule_slots(
         start_date=start_date,
@@ -382,7 +498,8 @@ def api_schedule_plan(payload: dict):
         target_type=target_type,
         parent_video_id=parent_id,
         overwrite_existing=overwrite,
-        video_ids=video_ids
+        video_ids=video_ids,
+        channel_id=channel_id
     )
     return {
         "message": f"Successfully assigned schedules to {len(assigned)} video(s)!",
@@ -402,6 +519,7 @@ def api_schedule_preview(payload: dict):
     target_type = payload.get("target_type", "SHORTS")
     parent_id = payload.get("parent_id")
     video_ids = payload.get("video_ids")
+    channel_id = payload.get("channel_id")
 
     if start_date_str:
         try:
@@ -417,6 +535,10 @@ def api_schedule_preview(payload: dict):
     try:
         where_clauses = ["status != 'PUBLISHED' AND status != 'SCHEDULED'"]
         params = []
+        if channel_id:
+            where_clauses.append("(channel_id = ? OR channel_id IS NULL OR channel_id = 1)")
+            params.append(channel_id)
+
         if video_ids:
             placeholders = ",".join(["?"] * len(video_ids))
             where_clauses.append(f"id IN ({placeholders})")
@@ -455,25 +577,55 @@ def api_update_video_schedule(payload: dict):
     update_video_schedule(int(vid_id), dt_str)
     return {"message": f"Updated schedule for video #{vid_id} to {dt_str}"}
 
-def bg_upload_single(video_id: int, headless: bool = False):
+def bg_upload_single(video_id: int, headless: bool = False, channel_id: int = None):
     global WORKER_STATE
     WORKER_STATE["is_busy"] = True
-    WORKER_STATE["current_task"] = f"Uploading & scheduling Video #{video_id} to YouTube Studio..."
+    
+    from db import get_channel_by_id, get_active_channel
+    target_ch = get_channel_by_id(channel_id) if channel_id else get_active_channel()
+    final_channel_id = target_ch["id"] if target_ch else 1
+    channel_name = target_ch["channel_name"] if target_ch else "Default Channel"
+
+    WORKER_STATE["current_task"] = f"Uploading Video #{video_id} to {channel_name}..."
     try:
-        from scheduler import upload_single_video
         from log_manager import step_log
-        step_log(f"Worker initiated single video upload for #{video_id} (headless={headless})", level="INFO", video_id=video_id)
-        res = upload_single_video(video_id, headless=headless)
-        WORKER_STATE["last_message"] = f"Video #{video_id} uploaded & scheduled successfully! ({res.get('youtube_url', '')})"
-        step_log(f"Worker completed upload for #{video_id} successfully!", level="SUCCESS", video_id=video_id)
+        step_log(f"Worker initiated single video upload for #{video_id} on Channel '{channel_name}' (#{final_channel_id}, headless={headless})", level="INFO", video_id=video_id)
+
+        cmd = [sys.executable, str(BASE_DIR / "scheduler.py"), "upload", str(video_id), "--channel", str(final_channel_id)]
+        if headless:
+            cmd.append("--headless")
+
+        sub_env = os.environ.copy()
+        sub_env["PYTHONIOENCODING"] = "utf-8"
+        sub_env["PYTHONUTF8"] = "1"
+
+        proc = subprocess.run(cmd, cwd=str(BASE_DIR), capture_output=True, text=True, encoding="utf-8", errors="replace", env=sub_env)
+        if proc.returncode != 0:
+            err_msg = proc.stderr.strip() or proc.stdout.strip() or f"Process exited with code {proc.returncode}"
+            WORKER_STATE["last_message"] = f"Upload error on #{video_id}: {err_msg[:120]}"
+            print(f"[!] Worker bg_upload_single failed for #{video_id}:\n{err_msg}", flush=True)
+            step_log(f"Worker upload error on #{video_id}: {err_msg}", level="ERROR", video_id=video_id)
+        else:
+            from db import get_connection
+            v_status = "SCHEDULED"
+            try:
+                c = get_connection()
+                row = c.cursor().execute("SELECT status FROM videos WHERE id = ?", (video_id,)).fetchone()
+                if row and row["status"]:
+                    v_status = row["status"]
+                c.close()
+            except Exception:
+                pass
+            if v_status == "PUBLISHED":
+                WORKER_STATE["last_message"] = f"Video #{video_id} published LIVE to '{channel_name}' successfully!"
+            else:
+                WORKER_STATE["last_message"] = f"Video #{video_id} uploaded & scheduled to '{channel_name}' successfully!"
+            step_log(f"Worker completed upload for #{video_id} to '{channel_name}' successfully ({v_status})!", level="SUCCESS", video_id=video_id)
     except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
         err_msg = str(e).strip() or repr(e)
         WORKER_STATE["last_message"] = f"Upload error on #{video_id}: {err_msg}"
-        print(f"[!] Worker bg_upload_single failed for #{video_id}:\n{tb}", flush=True)
         from log_manager import step_log
-        step_log(f"Worker upload error on #{video_id}: {err_msg}", level="ERROR", video_id=video_id)
+        step_log(f"Worker upload exception on #{video_id}: {err_msg}", level="ERROR", video_id=video_id)
     finally:
         WORKER_STATE["is_busy"] = False
         WORKER_STATE["current_task"] = "Idle"
@@ -482,33 +634,78 @@ def bg_upload_single(video_id: int, headless: bool = False):
 def api_upload_single_video(payload: dict, background_tasks: BackgroundTasks):
     vid_id = payload.get("video_id")
     headless = payload.get("headless", False)
+    req_ch_id = payload.get("channel_id")
     if not vid_id:
         raise HTTPException(status_code=400, detail="Missing video_id")
-    background_tasks.add_task(bg_upload_single, int(vid_id), headless)
-    return {"message": f"Upload started for video #{vid_id}"}
+    
+    from db import get_channel_by_id, get_active_channel, get_connection
+    target_ch = get_channel_by_id(req_ch_id) if req_ch_id else get_active_channel()
+    final_channel_id = target_ch["id"] if target_ch else 1
+    channel_name = target_ch["channel_name"] if target_ch else "Default Channel"
 
-def bg_upload_next(limit: int = 1, headless: bool = False):
+    # Single Source of Truth: update video's channel_id in DB to match
+    try:
+        conn = get_connection()
+        conn.cursor().execute("UPDATE videos SET channel_id = ? WHERE id = ?", (final_channel_id, int(vid_id)))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+    background_tasks.add_task(bg_upload_single, int(vid_id), headless, final_channel_id)
+    return {"message": f"Upload started for video #{vid_id} on {channel_name}", "channel_name": channel_name, "channel_id": final_channel_id}
+
+def bg_upload_next(limit: int = 1, headless: bool = False, channel_id: int = None):
     global WORKER_STATE
     WORKER_STATE["is_busy"] = True
-    WORKER_STATE["current_task"] = f"Uploading & scheduling next {limit} video(s)..."
+    from db import get_channel_by_id, get_active_channel
+    target_ch = get_channel_by_id(channel_id) if channel_id else get_active_channel()
+    final_channel_id = target_ch["id"] if target_ch else 1
+    channel_name = target_ch["channel_name"] if target_ch else "Default Channel"
+
+    WORKER_STATE["current_task"] = f"Uploading & scheduling next {limit} video(s) to {channel_name}..."
     try:
-        from scheduler import process_upload_queue
         from log_manager import step_log
-        step_log(f"Worker initiating batch upload of {limit} video(s)...", level="INFO")
-        process_upload_queue(limit=limit, headless=headless)
-        WORKER_STATE["last_message"] = f"Uploaded & scheduled {limit} video(s)."
-        step_log(f"Worker completed batch upload of {limit} video(s)!", level="SUCCESS")
+        step_log(f"Worker initiating batch upload of {limit} video(s) for Channel '{channel_name}' (#{final_channel_id})...", level="INFO")
+
+        cmd = [sys.executable, str(BASE_DIR / "scheduler.py"), "queue", str(limit), "--channel", str(final_channel_id)]
+        if headless:
+            cmd.append("--headless")
+
+        sub_env = os.environ.copy()
+        sub_env["PYTHONIOENCODING"] = "utf-8"
+        sub_env["PYTHONUTF8"] = "1"
+
+        proc = subprocess.run(cmd, cwd=str(BASE_DIR), capture_output=True, text=True, encoding="utf-8", errors="replace", env=sub_env)
+        if proc.returncode != 0:
+            err_msg = proc.stderr.strip() or proc.stdout.strip() or f"Process exited with code {proc.returncode}"
+            WORKER_STATE["last_message"] = f"Batch upload failed: {err_msg[:120]}"
+            print(f"[!] Worker bg_upload_next failed:\n{err_msg}", flush=True)
+            step_log(f"Worker batch upload error: {err_msg}", level="ERROR")
+        else:
+            WORKER_STATE["last_message"] = f"Batch upload of {limit} video(s) to '{channel_name}' completed!"
+            step_log(f"Worker completed batch upload of {limit} video(s) to '{channel_name}'!", level="SUCCESS")
     except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
         err_msg = str(e).strip() or repr(e)
         WORKER_STATE["last_message"] = f"Upload error: {err_msg}"
-        print(f"[!] Worker bg_upload_next failed:\n{tb}", flush=True)
         from log_manager import step_log
-        step_log(f"Worker batch upload error: {err_msg}", level="ERROR")
+        step_log(f"Worker batch upload exception: {err_msg}", level="ERROR")
     finally:
         WORKER_STATE["is_busy"] = False
         WORKER_STATE["current_task"] = "Idle"
+
+@app.post("/api/upload-next")
+def api_upload_next(payload: dict, background_tasks: BackgroundTasks):
+    limit = payload.get("limit", 1)
+    headless = payload.get("headless", False)
+    req_ch_id = payload.get("channel_id")
+    from db import get_channel_by_id, get_active_channel
+    target_ch = get_channel_by_id(req_ch_id) if req_ch_id else get_active_channel()
+    final_channel_id = target_ch["id"] if target_ch else 1
+    channel_name = target_ch["channel_name"] if target_ch else "Default Channel"
+
+    background_tasks.add_task(bg_upload_next, limit, headless, final_channel_id)
+    return {"message": f"Batch upload started for next {limit} video(s) on {channel_name}", "channel_name": channel_name}
 
 def bg_create_shorts(video_id: int, num_parts: int = 0, add_parts_label: bool = True):
     global WORKER_STATE
@@ -758,6 +955,35 @@ DASHBOARD_HTML = """
           <span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
           <span id="worker-task-text">Idle</span>
         </div>
+
+        <!-- Channel Switcher Dropdown in Top Bar -->
+        <div class="relative inline-block text-left" id="channel-dropdown-container">
+          <button onclick="toggleChannelDropdown(event)" id="current-channel-btn" class="flex items-center gap-2 px-3 py-1.5 rounded-full card border border-slate-700 bg-slate-900/90 hover:bg-slate-800 text-white font-medium text-xs shadow-sm transition">
+            <span id="active-channel-indicator" class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span class="text-slate-400 font-normal">Channel:</span>
+            <span id="active-channel-name" class="font-bold text-white">Lil Kido Stories</span>
+            <span id="active-channel-badge" class="px-1.5 py-0.2 text-[9px] rounded bg-emerald-950 text-emerald-400 border border-emerald-800/80">Connected</span>
+            <i class="fa-solid fa-chevron-down text-slate-400 text-[10px] ml-0.5"></i>
+          </button>
+          
+          <div id="channel-dropdown-menu" class="hidden absolute right-0 mt-2 w-72 rounded-xl card bg-slate-900 border border-slate-700 shadow-2xl z-50 p-2 space-y-1">
+            <div class="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between border-b border-slate-800">
+              <span>Connected Channels</span>
+              <span id="dropdown-channel-count" class="text-indigo-400 font-mono">1</span>
+            </div>
+            <div id="channel-dropdown-list" class="space-y-1 max-h-56 overflow-y-auto py-1">
+              <!-- Dynamically rendered -->
+            </div>
+            <div class="pt-2 border-t border-slate-800 flex items-center gap-1.5 text-[11px]">
+              <button onclick="openCreateChannelModal(); closeChannelDropdown();" class="flex-1 py-1.5 px-2 bg-indigo-600/30 hover:bg-indigo-600/40 text-indigo-300 rounded-lg text-center font-semibold transition flex items-center justify-center gap-1">
+                <i class="fa-solid fa-plus text-[10px]"></i> Connect Account
+              </button>
+              <button onclick="switchTab('channels'); closeChannelDropdown();" class="py-1.5 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-medium transition" title="Channels Panel">
+                <i class="fa-solid fa-users-gear text-xs"></i>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -786,9 +1012,14 @@ DASHBOARD_HTML = """
         <div class="text-[11px] text-slate-500 mt-1">Metadata ready</div>
       </div>
       <div class="card p-4">
-        <div class="text-xs text-slate-400 font-medium">Scheduled on YouTube</div>
-        <div id="kpi-scheduled" class="text-2xl font-bold text-emerald-400 mt-1">0</div>
-        <div class="text-[11px] text-slate-500 mt-1">Uploaded & queued</div>
+        <div class="text-xs text-slate-400 font-medium">Scheduled & Live</div>
+        <div class="flex items-baseline gap-2 mt-1">
+          <span id="kpi-scheduled" class="text-2xl font-bold text-emerald-400">0</span>
+          <span class="text-[10px] text-slate-400 font-mono">sched</span>
+          <span id="kpi-published" class="text-2xl font-bold text-green-300 ml-1">0</span>
+          <span class="text-[10px] text-green-400 font-mono">live</span>
+        </div>
+        <div class="text-[11px] text-slate-500 mt-1">Uploaded to YouTube</div>
       </div>
       <div class="card p-4">
         <div class="text-xs text-slate-400 font-medium">Failed</div>
@@ -831,20 +1062,23 @@ DASHBOARD_HTML = """
     </div>
 
     <!-- Tabs Navigation -->
-    <div class="flex items-center gap-4 border-b border-slate-800 pb-2 text-sm font-medium">
-      <button onclick="switchTab('videos')" id="tab-btn-videos" class="text-white border-b-2 border-red-500 pb-2 transition flex items-center gap-1.5">
+    <div class="flex items-center gap-4 border-b border-slate-800 pb-2 text-sm font-medium overflow-x-auto">
+      <button onclick="switchTab('videos')" id="tab-btn-videos" class="text-white border-b-2 border-red-500 pb-2 transition flex items-center gap-1.5 whitespace-nowrap">
         <i class="fa-solid fa-list-check"></i> Video Queue
       </button>
-      <button onclick="switchTab('parts')" id="tab-btn-parts" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5">
+      <button onclick="switchTab('parts')" id="tab-btn-parts" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap">
         <i class="fa-solid fa-bolt text-amber-400"></i> Generated Parts (<span id="parts-badge-count">0</span>)
       </button>
-      <button onclick="switchTab('logs')" id="tab-btn-logs" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5">
+      <button onclick="switchTab('channels')" id="tab-btn-channels" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap">
+        <i class="fa-solid fa-users-gear text-indigo-400"></i> Channels & Accounts (<span id="channels-badge-count">1</span>)
+      </button>
+      <button onclick="switchTab('logs')" id="tab-btn-logs" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap">
         <i class="fa-solid fa-clock-rotate-left"></i> Upload Logs History
       </button>
-      <button onclick="switchTab('commands')" id="tab-btn-commands" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5">
+      <button onclick="switchTab('commands')" id="tab-btn-commands" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap">
         <i class="fa-solid fa-terminal text-emerald-400"></i> Command Panel & Runner
       </button>
-      <button onclick="switchTab('branding')" id="tab-btn-branding" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5">
+      <button onclick="switchTab('branding')" id="tab-btn-branding" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap">
         <i class="fa-solid fa-palette text-pink-400"></i> Channel & Branding
       </button>
     </div>
@@ -869,6 +1103,11 @@ DASHBOARD_HTML = """
             <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2 text-[10px] text-slate-500"></i>
           </div>
 
+          <!-- Channel Filter -->
+          <select id="channel-filter" onchange="onChannelFilterChange()" class="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-indigo-300 font-medium">
+            <option value="ALL">🌐 All Channels</option>
+          </select>
+
           <!-- Video Type Filter -->
           <select id="type-filter" onchange="loadVideos()" class="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white">
             <option value="ALL">All Media Types</option>
@@ -882,6 +1121,7 @@ DASHBOARD_HTML = """
             <option value="SCANNED">Pending AI SEO (SCANNED)</option>
             <option value="METADATA_READY">Ready to Schedule</option>
             <option value="SCHEDULED">Scheduled</option>
+            <option value="PUBLISHED">Published (Live)</option>
             <option value="FAILED">Failed</option>
           </select>
         </div>
@@ -892,6 +1132,7 @@ DASHBOARD_HTML = """
           <thead class="bg-slate-900/80 text-slate-400 border-b border-slate-800 uppercase tracking-wider text-[10px]">
             <tr>
               <th class="p-3">ID</th>
+              <th class="p-3">Channel</th>
               <th class="p-3">Type / Part #</th>
               <th class="p-3">File / Title</th>
               <th class="p-3">Duration</th>
@@ -946,6 +1187,7 @@ DASHBOARD_HTML = """
           <thead class="bg-slate-900/80 text-slate-400 border-b border-slate-800 uppercase tracking-wider text-[10px]">
             <tr>
               <th class="p-3">Short ID</th>
+              <th class="p-3">Channel</th>
               <th class="p-3">Thumbnail</th>
               <th class="p-3">Part #</th>
               <th class="p-3">Short Title</th>
@@ -1546,6 +1788,193 @@ DASHBOARD_HTML = """
       </div>
     </div>
 
+    <!-- Tab 6: Multi-Channel & Multi-Account Management Panel -->
+    <div id="tab-channels" class="card p-6 space-y-6 hidden">
+      <!-- Section Header -->
+      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+        <div>
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center text-lg shadow">
+              <i class="fa-solid fa-users-gear"></i>
+            </div>
+            <div>
+              <h2 class="text-lg font-bold text-white tracking-tight">Connected YouTube Accounts & Channels</h2>
+              <p class="text-xs text-slate-400">Manage multiple channels side-by-side with 100% isolated Chrome browser profiles, distinct cookies, and independent schedules.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2.5">
+          <button onclick="verifyAllChannelSessions()" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition flex items-center gap-1.5 shadow">
+            <i class="fa-solid fa-arrows-rotate text-[11px]"></i> Verify All Sessions
+          </button>
+          <button onclick="openCreateChannelModal()" class="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-lg text-xs font-bold shadow-lg shadow-indigo-600/25 transition flex items-center gap-1.5">
+            <i class="fa-solid fa-plus text-[11px]"></i> Connect New YouTube Account
+          </button>
+        </div>
+      </div>
+
+      <!-- Channel Cards Grid -->
+      <div id="channels-cards-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <!-- Rendered dynamically via loadChannels() -->
+        <div class="card p-5 text-center text-slate-500 col-span-3">Loading connected channels...</div>
+      </div>
+
+      <!-- Multi-Channel Isolation & Safe Growth Guide -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+        <div class="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
+          <div class="flex items-center gap-2 text-indigo-400 font-bold text-xs">
+            <i class="fa-solid fa-shield-halved"></i>
+            <span>100% Isolated Profiles</span>
+          </div>
+          <p class="text-[11px] text-slate-400 leading-relaxed">
+            Each channel gets a dedicated Chrome profile directory (<code class="text-slate-300 font-mono">chrome_profiles/...</code>). You can log in to 3–4 accounts simultaneously without session conflicts, cookie overwrites, or Google sign-out issues.
+          </p>
+        </div>
+
+        <div class="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
+          <div class="flex items-center gap-2 text-amber-400 font-bold text-xs">
+            <i class="fa-solid fa-calendar-check"></i>
+            <span>Independent Schedules</span>
+          </div>
+          <p class="text-[11px] text-slate-400 leading-relaxed">
+            Assign custom daily posting frequencies and times per channel (e.g. Channel 1 @ 11:00 & 17:00, Channel 2 @ 12:00 & 18:00). Uploads use the assigned channel's authenticated profile.
+          </p>
+        </div>
+
+        <div class="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
+          <div class="flex items-center gap-2 text-pink-400 font-bold text-xs">
+            <i class="fa-solid fa-palette"></i>
+            <span>Distinct Visual Branding</span>
+          </div>
+          <p class="text-[11px] text-slate-400 leading-relaxed">
+            Tailor AI thumbnails, outro watermark text, and prompt templates to each channel's niche (e.g. 3D Pixar for kids, cinematic anime for stories, neon realistic for tech).
+          </p>
+        </div>
+      </div>
+    </div>
+
+  <!-- Modal: Connect New YouTube Channel -->
+  <div id="modal-create-channel" class="fixed inset-0 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4 z-50">
+    <div class="card max-w-lg w-full p-6 space-y-5 border-slate-700 shadow-2xl bg-slate-900">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-indigo-600/20 text-indigo-400 flex items-center justify-center text-sm">
+            <i class="fa-solid fa-plus"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-white">Connect New YouTube Account</h3>
+            <p class="text-xs text-slate-400">Creates an isolated profile to run another channel side-by-side</p>
+          </div>
+        </div>
+        <button onclick="closeCreateChannelModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      </div>
+
+      <div class="space-y-4 text-xs">
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">Channel Name *</label>
+          <input type="text" id="create-ch-name" placeholder="e.g. Bedtime Tales 4 Kids" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500">
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">YouTube Handle (Optional)</label>
+          <input type="text" id="create-ch-handle" placeholder="@BedtimeTales4Kids" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">AI Thumbnail Aesthetic</label>
+            <select id="create-ch-thumb-style" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-2 text-white focus:outline-none focus:border-indigo-500">
+              <option value="3D Pixar Animation" selected>3D Pixar Animation</option>
+              <option value="Anime / Manga 2D">Anime / Manga 2D</option>
+              <option value="Cinematic Photorealism">Cinematic Photorealism</option>
+              <option value="Watercolor Storybook">Watercolor Storybook</option>
+              <option value="Cyberpunk Neon 3D">Cyberpunk Neon 3D</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">Daily Shorts Slots</label>
+            <input type="text" id="create-ch-times" value="11:00, 17:00" placeholder="11:00, 17:00" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500">
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">Thumbnail Mood / Art Direction</label>
+          <input type="text" id="create-ch-mood" value="Joyful, safe, playful, magical, full of adventure" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500">
+        </div>
+
+        <div class="p-3 rounded-lg bg-indigo-950/30 border border-indigo-900/50 flex items-center justify-between">
+          <div>
+            <div class="font-semibold text-indigo-300">Open Login Browser Immediately</div>
+            <div class="text-[11px] text-slate-400">Launch Chrome with this isolated profile right after creating</div>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" id="create-ch-open-browser" checked class="sr-only peer">
+            <div class="w-8 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-600"></div>
+          </label>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+        <button type="button" onclick="closeCreateChannelModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium">Cancel</button>
+        <button type="button" onclick="submitCreateChannel()" class="px-5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-lg text-xs font-bold shadow-lg shadow-indigo-600/30">Create & Launch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Edit Channel Settings -->
+  <div id="modal-edit-channel" class="fixed inset-0 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4 z-50">
+    <div class="card max-w-lg w-full p-6 space-y-4 border-slate-700 shadow-2xl bg-slate-900">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-indigo-600/20 text-indigo-400 flex items-center justify-center">
+            <i class="fa-solid fa-gear"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-white">Channel Settings & Branding</h3>
+            <p id="edit-ch-subtitle" class="text-xs text-slate-400">Configure channel details</p>
+          </div>
+        </div>
+        <button onclick="closeEditChannelModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      </div>
+
+      <input type="hidden" id="edit-ch-id">
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">Channel Name</label>
+          <input type="text" id="edit-ch-name" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">YouTube Handle</label>
+          <input type="text" id="edit-ch-handle" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">Outro Call-To-Action Template</label>
+          <input type="text" id="edit-ch-watermark" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">Thumbnail Style</label>
+            <input type="text" id="edit-ch-thumb-style" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">Shorts Schedule Times</label>
+            <input type="text" id="edit-ch-times" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
+          </div>
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">Thumbnail Mood</label>
+          <input type="text" id="edit-ch-thumb-mood" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+        <button type="button" onclick="closeEditChannelModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium">Cancel</button>
+        <button type="button" onclick="submitEditChannel()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold shadow transition">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Interactive Cut Shorts Modal with "Add Parts Label:" toggle -->
   <div id="modal-cut-shorts" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
     <div class="card max-w-lg w-full p-6 space-y-5 border-slate-700 shadow-2xl bg-slate-900">
@@ -2096,6 +2525,10 @@ DASHBOARD_HTML = """
     let globalAddPartsLabel = true;
     let ALL_VIDEOS = [];
     let ALL_PARTS = [];
+    let ALL_CHANNELS = [];
+    let activeChannelId = 1;
+    let activeChannelObj = null;
+    let channelFilterId = 'ALL';
 
     function previewVideo(id, title) {
       const modal = document.getElementById('modal-video-preview');
@@ -2194,27 +2627,32 @@ DASHBOARD_HTML = """
       currentTab = tab;
       document.getElementById('tab-videos').classList.toggle('hidden', tab !== 'videos');
       document.getElementById('tab-parts').classList.toggle('hidden', tab !== 'parts');
+      const chTab = document.getElementById('tab-channels');
+      if (chTab) chTab.classList.toggle('hidden', tab !== 'channels');
       document.getElementById('tab-logs').classList.toggle('hidden', tab !== 'logs');
       document.getElementById('tab-commands').classList.toggle('hidden', tab !== 'commands');
       document.getElementById('tab-branding').classList.toggle('hidden', tab !== 'branding');
       
       const vBtn = document.getElementById('tab-btn-videos');
       const pBtn = document.getElementById('tab-btn-parts');
+      const chBtn = document.getElementById('tab-btn-channels');
       const lBtn = document.getElementById('tab-btn-logs');
       const cBtn = document.getElementById('tab-btn-commands');
       const bBtn = document.getElementById('tab-btn-branding');
 
-      const activeClass = "text-white border-b-2 border-red-500 pb-2 transition flex items-center gap-1.5";
-      const inactiveClass = "text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5";
+      const activeClass = "text-white border-b-2 border-red-500 pb-2 transition flex items-center gap-1.5 whitespace-nowrap";
+      const inactiveClass = "text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap";
 
-      vBtn.className = tab === 'videos' ? activeClass : inactiveClass;
-      pBtn.className = tab === 'parts' ? activeClass : inactiveClass;
-      lBtn.className = tab === 'logs' ? activeClass : inactiveClass;
-      cBtn.className = tab === 'commands' ? activeClass : inactiveClass;
-      bBtn.className = tab === 'branding' ? activeClass : inactiveClass;
+      if (vBtn) vBtn.className = tab === 'videos' ? activeClass : inactiveClass;
+      if (pBtn) pBtn.className = tab === 'parts' ? activeClass : inactiveClass;
+      if (chBtn) chBtn.className = tab === 'channels' ? activeClass : inactiveClass;
+      if (lBtn) lBtn.className = tab === 'logs' ? activeClass : inactiveClass;
+      if (cBtn) cBtn.className = tab === 'commands' ? activeClass : inactiveClass;
+      if (bBtn) bBtn.className = tab === 'branding' ? activeClass : inactiveClass;
 
       if (tab === 'videos') loadVideos();
       if (tab === 'parts') loadParts();
+      if (tab === 'channels') loadChannels();
       if (tab === 'logs') loadLogs();
       if (tab === 'commands') {
         populateCommandVideoSelect();
@@ -2225,10 +2663,431 @@ DASHBOARD_HTML = """
       }
     }
 
+    // -------------------------------------------------------------
+    // MULTI-ACCOUNT & MULTI-CHANNEL CLIENT FUNCTIONS
+    // -------------------------------------------------------------
+
+    function toggleChannelDropdown(e) {
+      if (e) e.stopPropagation();
+      const menu = document.getElementById('channel-dropdown-menu');
+      if (menu) menu.classList.toggle('hidden');
+    }
+
+    function closeChannelDropdown() {
+      const menu = document.getElementById('channel-dropdown-menu');
+      if (menu) menu.classList.add('hidden');
+    }
+
+    document.addEventListener('click', (e) => {
+      const container = document.getElementById('channel-dropdown-container');
+      if (container && !container.contains(e.target)) {
+        closeChannelDropdown();
+      }
+    });
+
+    async function loadChannels() {
+      try {
+        const res = await fetch('/api/channels');
+        if (!res.ok) return;
+        const data = await res.json();
+        ALL_CHANNELS = data.channels || [];
+        activeChannelObj = data.active_channel || (ALL_CHANNELS[0] || null);
+        activeChannelId = activeChannelObj ? activeChannelObj.id : 1;
+
+        // 1. Update Header Switcher
+        const activeNameEl = document.getElementById('active-channel-name');
+        const activeIndicatorEl = document.getElementById('active-channel-indicator');
+        const activeBadgeEl = document.getElementById('active-channel-badge');
+        const countBadgeEl = document.getElementById('channels-badge-count');
+        const dropdownCountEl = document.getElementById('dropdown-channel-count');
+
+        if (activeNameEl && activeChannelObj) {
+          activeNameEl.innerText = activeChannelObj.channel_name || 'My Channel';
+        }
+        if (countBadgeEl) countBadgeEl.innerText = ALL_CHANNELS.length;
+        if (dropdownCountEl) dropdownCountEl.innerText = `${ALL_CHANNELS.length} Account${ALL_CHANNELS.length === 1 ? '' : 's'}`;
+
+        const isAuth = activeChannelObj && activeChannelObj.is_authenticated == 1;
+        if (activeIndicatorEl) {
+          activeIndicatorEl.className = isAuth 
+            ? "w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" 
+            : "w-2.5 h-2.5 rounded-full bg-amber-500";
+        }
+        if (activeBadgeEl) {
+          activeBadgeEl.innerText = isAuth ? "Connected" : "Login Needed";
+          activeBadgeEl.className = isAuth 
+            ? "px-1.5 py-0.2 text-[9px] rounded bg-emerald-950 text-emerald-400 border border-emerald-800/80 font-semibold"
+            : "px-1.5 py-0.2 text-[9px] rounded bg-amber-950 text-amber-300 border border-amber-800/80 font-semibold";
+        }
+
+        // 2. Render Dropdown Menu Items
+        const listEl = document.getElementById('channel-dropdown-list');
+        if (listEl) {
+          listEl.innerHTML = ALL_CHANNELS.map(ch => {
+            const isActive = ch.id === activeChannelId;
+            const chAuth = ch.is_authenticated == 1;
+            return `
+              <div onclick="switchActiveChannel(${ch.id}); closeChannelDropdown();" 
+                   class="p-2 rounded-lg cursor-pointer transition flex items-center justify-between ${isActive ? 'bg-indigo-950/70 border border-indigo-800/80' : 'hover:bg-slate-800/70 border border-transparent'}">
+                <div class="flex items-center gap-2 overflow-hidden">
+                  <span class="w-2 h-2 rounded-full ${chAuth ? 'bg-emerald-400' : 'bg-amber-400'}"></span>
+                  <div class="truncate">
+                    <div class="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                      <span>${ch.channel_name}</span>
+                      ${isActive ? '<span class="text-[9px] text-indigo-400 font-mono">(Active)</span>' : ''}
+                    </div>
+                    <div class="text-[10px] text-slate-400 font-mono truncate">${ch.handle || '@channel'} • ${ch.video_count || 0} vids</div>
+                  </div>
+                </div>
+                ${isActive ? '<i class="fa-solid fa-check text-indigo-400 text-xs"></i>' : ''}
+              </div>
+            `;
+          }).join('');
+        }
+
+        // 3. Update Channel Filter Dropdown
+        const chFilterEl = document.getElementById('channel-filter');
+        if (chFilterEl) {
+          const prevVal = chFilterEl.value;
+          chFilterEl.innerHTML = `
+            <option value="ALL">🌐 All Channels (${ALL_CHANNELS.length})</option>
+            ${ALL_CHANNELS.map(c => `<option value="${c.id}">${c.is_authenticated == 1 ? '🟢' : '🟡'} ${c.channel_name} (${c.video_count || 0})</option>`).join('')}
+          `;
+          if (prevVal && (prevVal === 'ALL' || ALL_CHANNELS.some(c => String(c.id) === String(prevVal)))) {
+            chFilterEl.value = prevVal;
+          }
+        }
+
+        // 4. Render Channels Tab Grid Cards
+        const gridEl = document.getElementById('channels-cards-grid');
+        if (gridEl) {
+          if (ALL_CHANNELS.length === 0) {
+            gridEl.innerHTML = '<div class="card p-6 text-center text-slate-500 col-span-3">No channels found. Click "Connect New YouTube Account" to get started!</div>';
+          } else {
+            gridEl.innerHTML = ALL_CHANNELS.map(ch => {
+              const isActive = ch.id === activeChannelId;
+              const isAuth = ch.is_authenticated == 1;
+              const chNameSafe = ch.channel_name.replace(/'/g, "\\'");
+              const profDirName = ch.profile_dir ? ch.profile_dir.split(/[/\\\\]/).pop() : 'chrome_profile';
+
+              return `
+                <div class="card p-5 space-y-4 border ${isActive ? 'border-indigo-500/80 bg-slate-900/90 shadow-lg shadow-indigo-950/40' : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'} flex flex-col justify-between">
+                  <div class="space-y-3">
+                    <!-- Top row: Avatar & Identity -->
+                    <div class="flex items-start justify-between gap-3">
+                      <div class="flex items-center gap-3">
+                        <div class="w-12 h-12 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center text-white font-bold text-lg shadow-md border border-indigo-400/20">
+                          ${ch.channel_name ? ch.channel_name.substring(0, 2).toUpperCase() : 'YT'}
+                        </div>
+                        <div>
+                          <div class="flex items-center gap-2">
+                            <h3 class="text-sm font-bold text-white tracking-tight">${ch.channel_name}</h3>
+                            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">#${ch.id}</span>
+                          </div>
+                          <p class="text-xs text-indigo-300 font-mono">${ch.handle || '@' + ch.channel_key}</p>
+                        </div>
+                      </div>
+
+                      <!-- Active Pill -->
+                      ${isActive ? `
+                        <span class="px-2.5 py-1 rounded-full bg-indigo-950 border border-indigo-700/80 text-indigo-300 font-bold text-[10px] flex items-center gap-1 shadow">
+                          <i class="fa-solid fa-star text-amber-400 text-[9px]"></i> Active
+                        </span>
+                      ` : `
+                        <button onclick="switchActiveChannel(${ch.id})" class="px-2 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 transition">
+                          Set Active
+                        </button>
+                      `}
+                    </div>
+
+                    <!-- Connection Status Pill -->
+                    <div class="p-2.5 rounded-lg ${isAuth ? 'bg-emerald-950/40 border border-emerald-800/60 text-emerald-300' : 'bg-amber-950/40 border border-amber-800/60 text-amber-300'} flex items-center justify-between text-xs">
+                      <div class="flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full ${isAuth ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}"></span>
+                        <span class="font-semibold">${isAuth ? 'Studio Session Connected' : 'Google Login Required'}</span>
+                      </div>
+                      <button onclick="verifyChannelSession(${ch.id})" class="text-[10px] underline hover:text-white" title="Test session">
+                        <i class="fa-solid fa-arrows-rotate mr-0.5"></i> Test
+                      </button>
+                    </div>
+
+                    <!-- Metrics Grid (4 mini KPIs) -->
+                    <div class="grid grid-cols-4 gap-2 text-center pt-1">
+                      <div class="p-2 rounded-lg bg-slate-950/80 border border-slate-800/80">
+                        <div class="text-[10px] text-slate-400 uppercase">Videos</div>
+                        <div class="text-base font-bold text-white mt-0.5">${ch.video_count || 0}</div>
+                      </div>
+                      <div class="p-2 rounded-lg bg-slate-950/80 border border-slate-800/80">
+                        <div class="text-[10px] text-amber-400 uppercase">Shorts</div>
+                        <div class="text-base font-bold text-amber-300 mt-0.5">${ch.shorts_count || 0}</div>
+                      </div>
+                      <div class="p-2 rounded-lg bg-slate-950/80 border border-slate-800/80">
+                        <div class="text-[10px] text-blue-400 uppercase">Sched</div>
+                        <div class="text-base font-bold text-blue-300 mt-0.5">${ch.scheduled_count || 0}</div>
+                      </div>
+                      <div class="p-2 rounded-lg bg-slate-950/80 border border-slate-800/80">
+                        <div class="text-[10px] text-emerald-400 uppercase">Live</div>
+                        <div class="text-base font-bold text-emerald-300 mt-0.5">${ch.published_count || 0}</div>
+                      </div>
+                    </div>
+
+                    <!-- Profile Location & Details -->
+                    <div class="text-[11px] text-slate-400 space-y-1 pt-1 font-mono">
+                      <div class="flex items-center gap-1.5 truncate" title="${ch.profile_dir}">
+                        <i class="fa-regular fa-folder text-slate-500"></i>
+                        <span>Profile: <span class="text-slate-300">${profDirName}</span></span>
+                      </div>
+                      <div class="flex items-center gap-1.5 truncate">
+                        <i class="fa-solid fa-palette text-slate-500"></i>
+                        <span>Style: <span class="text-slate-300 font-sans">${ch.thumbnail_style || '3D Pixar'}</span></span>
+                      </div>
+                      <div class="flex items-center gap-1.5 truncate">
+                        <i class="fa-solid fa-clock text-slate-500"></i>
+                        <span>Shorts Times: <span class="text-amber-400">${ch.shorts_schedule_times || '["11:00", "17:00"]'}</span></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Actions Footer -->
+                  <div class="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-1.5 flex-wrap">
+                    <button onclick="launchChannelLogin(${ch.id}, '${chNameSafe}')" class="flex-1 py-1.5 px-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white rounded-lg text-xs font-bold shadow-md shadow-red-600/20 transition flex items-center justify-center gap-1.5">
+                      <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+                      <span>${isAuth ? 'Open Studio Chrome' : '🔑 Log In In Chrome'}</span>
+                    </button>
+
+                    <button onclick="openEditChannelModal(${ch.id})" class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition" title="Channel Settings">
+                      <i class="fa-solid fa-gear"></i>
+                    </button>
+
+                    ${ch.id !== 1 ? `
+                      <button onclick="deleteChannelConfirm(${ch.id}, '${chNameSafe}')" class="p-2 bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 rounded-lg text-xs transition" title="Remove Channel">
+                        <i class="fa-solid fa-trash-can"></i>
+                      </button>
+                    ` : ''}
+                  </div>
+                </div>
+              `;
+            }).join('');
+          }
+        }
+      } catch (err) {
+        console.error("loadChannels error:", err);
+      }
+    }
+
+    async function switchActiveChannel(channelId) {
+      try {
+        const res = await fetch(`/api/channels/${channelId}/set-active`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+          activeChannelId = channelId;
+          const chFilterEl = document.getElementById('channel-filter');
+          if (chFilterEl) {
+            chFilterEl.value = channelId;
+          }
+          await loadChannels();
+          await loadChannelSettings();
+          fetchStatus();
+          loadVideos();
+          loadParts();
+        } else {
+          alert("Error: " + (data.detail || data.message));
+        }
+      } catch (err) {
+        alert("Failed to switch channel: " + err);
+      }
+    }
+
+    async function launchChannelLogin(channelId, channelName) {
+      try {
+        const res = await fetch(`/api/channels/${channelId}/login`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+          alert(`🌐 Chrome Login Window Opened for:\n"${channelName}" (Channel #${channelId})\n\n1. Sign in to your YouTube / Google account in the Chrome window that just opened.\n2. Once logged in, click "Test" or "Verify Session" here on the dashboard.`);
+        } else {
+          alert("Launch error: " + (data.detail || data.message));
+        }
+      } catch (err) {
+        alert("Failed to launch Chrome: " + err);
+      }
+    }
+
+    async function verifyChannelSession(channelId) {
+      try {
+        const res = await fetch(`/api/channels/${channelId}/verify`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+          if (data.authenticated) {
+            alert(`🎉 Verification Success!\n\nChannel "${data.channel_name}" is ACTIVE & AUTHENTICATED with YouTube Studio!`);
+          } else {
+            alert(`⚠️ Not Logged In Yet for "${data.channel_name}".\n\nPlease click "🔑 Log In In Chrome", complete sign-in in the opened browser, and test again.`);
+          }
+          await loadChannels();
+          fetchStatus();
+        } else {
+          alert("Verify error: " + (data.detail || data.message));
+        }
+      } catch (err) {
+        alert("Failed to verify session: " + err);
+      }
+    }
+
+    async function verifyAllChannelSessions() {
+      for (const ch of ALL_CHANNELS) {
+        try {
+          await fetch(`/api/channels/${ch.id}/verify`, { method: 'POST' });
+        } catch(e) {}
+      }
+      await loadChannels();
+      fetchStatus();
+      alert("✓ Verification completed for all connected accounts.");
+    }
+
+    function openCreateChannelModal() {
+      document.getElementById('create-ch-name').value = '';
+      document.getElementById('create-ch-handle').value = '';
+      document.getElementById('modal-create-channel').classList.remove('hidden');
+      document.getElementById('modal-create-channel').classList.add('flex');
+    }
+
+    function closeCreateChannelModal() {
+      document.getElementById('modal-create-channel').classList.add('hidden');
+      document.getElementById('modal-create-channel').classList.remove('flex');
+    }
+
+    async function submitCreateChannel() {
+      const name = document.getElementById('create-ch-name').value.trim();
+      const handle = document.getElementById('create-ch-handle').value.trim();
+      const style = document.getElementById('create-ch-thumb-style').value;
+      const mood = document.getElementById('create-ch-mood').value.trim();
+      const timesRaw = document.getElementById('create-ch-times').value;
+      const openBrowser = document.getElementById('create-ch-open-browser').checked;
+
+      if (!name) return alert("Please enter a channel name.");
+
+      const times = timesRaw.split(',').map(t => t.trim()).filter(Boolean);
+
+      try {
+        const res = await fetch('/api/channels/create', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            channel_name: name,
+            handle: handle,
+            thumbnail_style: style,
+            thumbnail_mood: mood,
+            shorts_schedule_times: times.length ? times : ["11:00", "17:00"]
+          })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          const newCh = data.channel;
+          closeCreateChannelModal();
+          await loadChannels();
+
+          if (openBrowser && newCh && newCh.id) {
+            launchChannelLogin(newCh.id, newCh.channel_name);
+          } else {
+            alert(`🎉 Created channel "${name}"! Click "Log In In Chrome" to connect your Google account.`);
+          }
+        } else {
+          alert("Error: " + (data.detail || data.message));
+        }
+      } catch (err) {
+        alert("Failed to create channel: " + err);
+      }
+    }
+
+    function openEditChannelModal(channelId) {
+      const ch = ALL_CHANNELS.find(c => c.id === channelId);
+      if (!ch) return;
+      document.getElementById('edit-ch-id').value = ch.id;
+      document.getElementById('edit-ch-subtitle').innerText = `Configure #${ch.id}: ${ch.channel_name}`;
+      document.getElementById('edit-ch-name').value = ch.channel_name || '';
+      document.getElementById('edit-ch-handle').value = ch.handle || '';
+      document.getElementById('edit-ch-watermark').value = ch.watermark_text || 'Watch next part on {channel_name}';
+      document.getElementById('edit-ch-thumb-style').value = ch.thumbnail_style || '3D Pixar Animation';
+      document.getElementById('edit-ch-thumb-mood').value = ch.thumbnail_mood || '';
+      document.getElementById('edit-ch-times').value = typeof ch.shorts_schedule_times === 'string' ? ch.shorts_schedule_times.replace(/[\[\]"]/g, '') : (ch.shorts_schedule_times || []).join(', ');
+
+      document.getElementById('modal-edit-channel').classList.remove('hidden');
+      document.getElementById('modal-edit-channel').classList.add('flex');
+    }
+
+    function closeEditChannelModal() {
+      document.getElementById('modal-edit-channel').classList.add('hidden');
+      document.getElementById('modal-edit-channel').classList.remove('flex');
+    }
+
+    async function submitEditChannel() {
+      const id = parseInt(document.getElementById('edit-ch-id').value);
+      const name = document.getElementById('edit-ch-name').value.trim();
+      const handle = document.getElementById('edit-ch-handle').value.trim();
+      const watermark = document.getElementById('edit-ch-watermark').value.trim();
+      const style = document.getElementById('edit-ch-thumb-style').value.trim();
+      const mood = document.getElementById('edit-ch-thumb-mood').value.trim();
+      const timesRaw = document.getElementById('edit-ch-times').value;
+      const times = timesRaw.split(',').map(t => t.trim()).filter(Boolean);
+
+      try {
+        const res = await fetch(`/api/channels/${id}/update`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            channel_name: name,
+            handle: handle,
+            watermark_text: watermark,
+            thumbnail_style: style,
+            thumbnail_mood: mood,
+            shorts_schedule_times: times
+          })
+        });
+
+        if (res.ok) {
+          closeEditChannelModal();
+          await loadChannels();
+          fetchStatus();
+        } else {
+          const err = await res.json();
+          alert("Update error: " + (err.detail || err.message));
+        }
+      } catch (e) {
+        alert("Failed to update channel: " + e);
+      }
+    }
+
+    async function deleteChannelConfirm(channelId, channelName) {
+      if (!confirm(`Are you sure you want to remove channel "${channelName}" (ID #${channelId})?\n\nAny videos assigned to this channel will be moved back to Channel 1.`)) {
+        return;
+      }
+      try {
+        const res = await fetch(`/api/channels/${channelId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (res.ok) {
+          await loadChannels();
+          fetchStatus();
+          loadVideos();
+          loadParts();
+        } else {
+          alert("Error: " + (data.detail || data.message));
+        }
+      } catch (err) {
+        alert("Failed to delete channel: " + err);
+      }
+    }
+
+    function onChannelFilterChange() {
+      channelFilterId = document.getElementById('channel-filter').value;
+      loadVideos();
+      loadParts();
+    }
+
     // Channel & Branding Settings Functions
     async function loadChannelSettings() {
       try {
-        const res = await fetch('/api/channel-settings');
+        const url = activeChannelId ? `/api/channel-settings?channel_id=${activeChannelId}` : '/api/channel-settings';
+        const res = await fetch(url);
         const data = await res.json();
         const s = data.settings || {};
         
@@ -2244,8 +3103,9 @@ DASHBOARD_HTML = """
         document.getElementById('brand-logo-size-val').innerText = (s.logo_size || 110) + 'px';
         
         const timestamp = new Date().getTime();
-        document.getElementById('brand-logo-preview-img').src = '/api/logo-image?t=' + timestamp;
-        document.getElementById('sim-logo-img').src = '/api/logo-image?t=' + timestamp;
+        const logoUrl = `/api/logo-image?channel_id=${activeChannelId || ''}&t=${timestamp}`;
+        document.getElementById('brand-logo-preview-img').src = logoUrl;
+        document.getElementById('sim-logo-img').src = logoUrl;
         
         if (s.schedule_frequency) currentScheduleFrequency = s.schedule_frequency;
         if (s.shorts_schedule_times && s.shorts_schedule_times.length > 0) currentScheduleTimeSlots = s.shorts_schedule_times;
@@ -2329,10 +3189,11 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
       if (!file) return;
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('channel_id', activeChannelId);
       
       document.getElementById('brand-logo-status').innerText = 'Uploading...';
       try {
-        const res = await fetch('/api/upload-logo', {
+        const res = await fetch(`/api/upload-logo?channel_id=${activeChannelId || ''}`, {
           method: 'POST',
           body: formData
         });
@@ -2343,11 +3204,13 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
         }
         const data = await res.json();
         const t = new Date().getTime();
-        document.getElementById('brand-logo-preview-img').src = '/api/logo-image?t=' + t;
-        document.getElementById('sim-logo-img').src = '/api/logo-image?t=' + t;
+        const logoUrl = `/api/logo-image?channel_id=${activeChannelId || ''}&t=${t}`;
+        document.getElementById('brand-logo-preview-img').src = logoUrl;
+        document.getElementById('sim-logo-img').src = logoUrl;
         document.getElementById('brand-logo-status').innerText = 'Uploaded & Active';
         document.getElementById('brand-save-status').innerText = '✓ Logo updated and set as active!';
         document.getElementById('brand-save-status').className = 'text-xs text-emerald-400 font-bold';
+        await loadChannels();
       } catch (e) {
         alert('Upload error: ' + e);
         document.getElementById('brand-logo-status').innerText = 'Upload failed';
@@ -2356,6 +3219,7 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
 
     async function saveChannelSettingsForm() {
       const payload = {
+        channel_id: activeChannelId,
         channel_name: document.getElementById('brand-channel-name').value.trim(),
         show_outro: document.getElementById('brand-show-outro').checked,
         outro_duration_sec: parseFloat(document.getElementById('brand-outro-duration').value) || 3.5,
@@ -2376,6 +3240,7 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
           body: JSON.stringify(payload)
         });
         if (res.ok) {
+          await loadChannels();
           const statusEl = document.getElementById('brand-save-status');
           statusEl.innerText = '✓ Settings saved successfully! Will apply to next Shorts cuts.';
           statusEl.className = 'text-xs text-emerald-400 font-bold';
@@ -2481,6 +3346,8 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
         document.getElementById('kpi-pending').innerText = stats.pending_ai || 0;
         document.getElementById('kpi-ready').innerText = stats.ready_to_schedule || 0;
         document.getElementById('kpi-scheduled').innerText = stats.scheduled || 0;
+        const pubEl = document.getElementById('kpi-published');
+        if (pubEl) pubEl.innerText = stats.published || 0;
         document.getElementById('kpi-failed').innerText = stats.failed || 0;
 
       } catch (e) {
@@ -2509,6 +3376,8 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
         let url = `/api/videos?filter=${filter}`;
         if (videoType !== 'ALL') url += `&video_type=${videoType}`;
         if (currentParentFilter) url += `&parent_id=${currentParentFilter}`;
+        const chFilter = document.getElementById('channel-filter')?.value || 'ALL';
+        if (chFilter !== 'ALL') url += `&channel_id=${chFilter}`;
 
         const res = await fetch(url);
         let videos = await res.json();
@@ -2526,7 +3395,7 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
         const tbody = document.getElementById('videos-tbody');
 
         if (!videos || videos.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="7" class="p-6 text-center text-slate-500">No videos found matching filters.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="8" class="p-6 text-center text-slate-500">No videos found matching filters.</td></tr>';
           return;
         }
 
@@ -2546,13 +3415,20 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
           let statusClass = "bg-slate-800 text-slate-400";
           if (v.status === 'METADATA_READY') statusClass = "bg-blue-950 text-blue-400 border border-blue-800/60";
           if (v.status === 'SCHEDULED') statusClass = "bg-emerald-950 text-emerald-400 border border-emerald-800/60";
+          if (v.status === 'PUBLISHED') statusClass = "bg-green-950 text-emerald-300 border border-emerald-600/90 font-bold";
           if (v.status === 'FAILED') statusClass = "bg-rose-950 text-rose-400 border border-rose-800/60";
 
           const safeTitle = (v.title || v.file_name).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+          const chName = v.channel_name || (ALL_CHANNELS.find(c => c.id === v.channel_id)?.channel_name || 'Channel ' + (v.channel_id || 1));
 
           return `
             <tr class="table-row">
-              <td class="p-3 text-slate-500">#${v.id}</td>
+              <td class="p-3 text-slate-500 font-mono">#${v.id}</td>
+              <td class="p-3">
+                <span class="px-2 py-0.5 rounded text-[10px] bg-indigo-950/80 text-indigo-300 border border-indigo-800/70 font-medium whitespace-nowrap">
+                  <i class="fa-brands fa-youtube text-[9px] mr-1"></i>${chName}
+                </span>
+              </td>
               <td class="p-3">${typeBadge}</td>
               <td class="p-3 max-w-sm">
                 <div class="font-medium text-slate-200 truncate">${v.title || v.file_name}</div>
@@ -2611,7 +3487,11 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
 
     async function loadParts() {
       try {
-        const res = await fetch('/api/videos?video_type=PARTS');
+        let url = '/api/videos?video_type=PARTS';
+        const chFilter = document.getElementById('channel-filter')?.value || 'ALL';
+        if (chFilter !== 'ALL') url += `&channel_id=${chFilter}`;
+
+        const res = await fetch(url);
         const parts = await res.json();
         ALL_PARTS = parts || [];
         const tbody = document.getElementById('parts-tbody');
@@ -2619,7 +3499,7 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
         if (countPill) countPill.innerText = `${ALL_PARTS.length} Shorts Ready`;
 
         if (!parts || parts.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="9" class="p-6 text-center text-slate-500">No parts generated yet. Click "Cut Shorts" on any long video in the Video Queue!</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="10" class="p-6 text-center text-slate-500">No parts generated yet. Click "Cut Shorts" on any long video in the Video Queue!</td></tr>';
           return;
         }
 
@@ -2627,14 +3507,21 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
           let statusClass = "bg-slate-800 text-slate-400";
           if (p.status === 'METADATA_READY') statusClass = "bg-blue-950 text-blue-400 border border-blue-800/60";
           if (p.status === 'SCHEDULED') statusClass = "bg-emerald-950 text-emerald-400 border border-emerald-800/60";
+          if (p.status === 'PUBLISHED') statusClass = "bg-green-950 text-emerald-300 border border-emerald-600/90 font-bold";
           if (p.status === 'FAILED') statusClass = "bg-rose-950 text-rose-400 border border-rose-800/60";
 
           const safePartTitle = (p.title || p.file_name).replace(/'/g, "\\'").replace(/"/g, '&quot;');
           const hasThumb = Boolean(p.thumbnail_path);
+          const chName = p.channel_name || (ALL_CHANNELS.find(c => c.id === p.channel_id)?.channel_name || 'Channel ' + (p.channel_id || 1));
 
           return `
             <tr class="table-row">
               <td class="p-3 text-slate-500 font-mono">#${p.id}</td>
+              <td class="p-3">
+                <span class="px-2 py-0.5 rounded text-[10px] bg-indigo-950/80 text-indigo-300 border border-indigo-800/70 font-medium whitespace-nowrap">
+                  <i class="fa-brands fa-youtube text-[9px] mr-1"></i>${chName}
+                </span>
+              </td>
               <td class="p-3">
                 <div onclick="previewThumbnail(${p.id}, '${safePartTitle}')" class="relative w-12 h-20 rounded-md overflow-hidden border border-slate-700 bg-slate-950 flex-shrink-0 cursor-pointer group shadow hover:border-purple-400 transition" title="Click to view full thumbnail">
                   <img src="/api/thumbnail/${p.id}?t=${hasThumb ? '1' : '0'}" class="w-full h-full object-cover" onerror="this.onerror=null; this.style.display='none'; this.nextElementSibling.style.display='flex';">
@@ -2966,6 +3853,19 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
       modal.classList.remove('hidden');
       modal.classList.add('flex');
 
+      if (activeChannelObj) {
+        if (activeChannelObj.schedule_frequency) {
+          setScheduleFrequency(activeChannelObj.schedule_frequency);
+        }
+        if (activeChannelObj.shorts_schedule_times) {
+          try {
+            const raw = activeChannelObj.shorts_schedule_times;
+            const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            if (Array.isArray(parsed) && parsed.length > 0) currentScheduleTimeSlots = parsed;
+          } catch(e) {}
+        }
+      }
+
       const radios = document.getElementsByName('sched-target');
       for (const r of radios) {
         if (r.value === targetType) r.checked = true;
@@ -3104,7 +4004,8 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
               interval_days: interval,
               time_slots: currentScheduleTimeSlots,
               start_date: startDate,
-              target_type: target
+              target_type: target,
+              channel_id: activeChannelId
             })
           });
 
@@ -3180,7 +4081,8 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
             time_slots: currentScheduleTimeSlots,
             start_date: startDate,
             target_type: target,
-            overwrite_existing: overwrite
+            overwrite_existing: overwrite,
+            channel_id: activeChannelId
           })
         });
 
@@ -3236,10 +4138,11 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
         const res = await fetch('/api/upload-next', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({limit: limit, headless: headless})
+          body: JSON.stringify({limit: limit, headless: headless, channel_id: activeChannelId})
         });
         const data = await res.json();
-        alert(`🚀 Upload task launched for ${limit} video(s)!\\n\\nPlaywright is automating YouTube Studio. Check the Worker status banner at top.`);
+        const chName = activeChannelObj ? activeChannelObj.channel_name : 'active channel';
+        alert(`🚀 Upload task launched for ${limit} video(s) to "${chName}"!\n\nPlaywright is automating YouTube Studio. Check the Worker status banner at top.`);
         fetchStatus();
       } catch (e) {
         alert("Upload dispatch error: " + e);
@@ -3314,7 +4217,8 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
     }
 
     async function uploadSingleVideoConfirm(id, title) {
-      if (!confirm(`Launch YouTube Studio automation to upload and schedule:\\n"${title}" (ID #${id})?\\n\\nA browser window will open to automate YouTube Studio.`)) {
+      const chName = activeChannelObj ? activeChannelObj.channel_name : 'Active Channel';
+      if (!confirm(`Launch YouTube Studio automation to upload and schedule to channel "${chName}":\n"${title}" (ID #${id})?\n\nA browser window will open to automate YouTube Studio.`)) {
         return;
       }
 
@@ -3322,10 +4226,10 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
         const res = await fetch('/api/upload-single-video', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({video_id: id, headless: false})
+          body: JSON.stringify({video_id: id, headless: false, channel_id: activeChannelId})
         });
         const data = await res.json();
-        alert(`🚀 Upload started for Short #${id}!\\nWatch the worker status banner or browser window.`);
+        alert(`🚀 Upload started for Short #${id} to "${chName}"!\nWatch the worker status banner or browser window.`);
         fetchStatus();
       } catch (e) {
         alert("Upload error: " + e);
@@ -3496,12 +4400,18 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
       fetchStatus();
       if (currentTab === 'videos') loadVideos();
       if (currentTab === 'parts') loadParts();
+      if (currentTab === 'channels') loadChannels();
       if (currentTab === 'logs') loadLogs();
       if (currentTab === 'commands' || prevIsRunning) pollTerminal();
     }, 2000);
 
-    fetchStatus();
-    loadVideos();
+    async function initDashboard() {
+      await loadChannels();
+      await loadChannelSettings();
+      fetchStatus();
+      loadVideos();
+    }
+    initDashboard();
   </script>
 </body>
 </html>

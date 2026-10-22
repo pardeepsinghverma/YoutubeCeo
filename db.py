@@ -89,6 +89,19 @@ def init_db():
     except Exception:
         pass
 
+    for col, col_type in [
+        ("show_logo", "BOOLEAN DEFAULT 1"),
+        ("logo_position", "TEXT DEFAULT 'top_right'"),
+        ("logo_size", "INTEGER DEFAULT 110"),
+        ("logo_opacity", "REAL DEFAULT 0.9"),
+        ("show_outro", "BOOLEAN DEFAULT 1"),
+        ("outro_duration_sec", "REAL DEFAULT 3.5")
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE channels ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
+
     # Seed default channel from existing channel_settings if table is empty
     cursor.execute("SELECT COUNT(*) FROM channels")
     if cursor.fetchone()[0] == 0:
@@ -116,13 +129,24 @@ def init_db():
     conn.commit()
     conn.close()
 
-def add_video(file_path, file_name, file_size_mb, duration_seconds, width, height, is_short, parent_video_id=None, part_number=None):
+def add_video(file_path, file_name, file_size_mb, duration_seconds, width, height, is_short, parent_video_id=None, part_number=None, channel_id=None):
     conn = get_connection()
     cursor = conn.cursor()
     try:
+        resolved_channel_id = channel_id
+        if not resolved_channel_id and parent_video_id:
+            cursor.execute("SELECT channel_id FROM videos WHERE id = ?", (parent_video_id,))
+            p_row = cursor.fetchone()
+            if p_row and p_row["channel_id"]:
+                resolved_channel_id = p_row["channel_id"]
+        if not resolved_channel_id:
+            cursor.execute("SELECT id FROM channels WHERE is_active = 1 LIMIT 1")
+            act_row = cursor.fetchone()
+            resolved_channel_id = act_row["id"] if act_row else 1
+
         cursor.execute("""
-        INSERT INTO videos (file_path, file_name, file_size_mb, duration_seconds, width, height, is_short, status, parent_video_id, part_number)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'SCANNED', ?, ?)
+        INSERT INTO videos (file_path, file_name, file_size_mb, duration_seconds, width, height, is_short, status, parent_video_id, part_number, channel_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'SCANNED', ?, ?, ?)
         ON CONFLICT(file_path) DO UPDATE SET 
             file_name = excluded.file_name,
             file_size_mb = excluded.file_size_mb,
@@ -132,8 +156,9 @@ def add_video(file_path, file_name, file_size_mb, duration_seconds, width, heigh
             is_short = excluded.is_short,
             parent_video_id = COALESCE(excluded.parent_video_id, videos.parent_video_id),
             part_number = COALESCE(excluded.part_number, videos.part_number),
+            channel_id = COALESCE(videos.channel_id, excluded.channel_id),
             updated_at = CURRENT_TIMESTAMP
-        """, (str(file_path), file_name, file_size_mb, duration_seconds, width, height, 1 if is_short else 0, parent_video_id, part_number))
+        """, (str(file_path), file_name, file_size_mb, duration_seconds, width, height, 1 if is_short else 0, parent_video_id, part_number, resolved_channel_id))
         conn.commit()
         if cursor.lastrowid:
             return cursor.lastrowid
@@ -186,6 +211,22 @@ def mark_video_scheduled(video_id, scheduled_dt_str, yt_url=None, yt_id=None):
     finally:
         conn.close()
 
+def mark_video_published(video_id, yt_url=None, yt_id=None):
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+        UPDATE videos 
+        SET status = 'PUBLISHED', 
+            youtube_url = COALESCE(?, youtube_url), 
+            youtube_video_id = COALESCE(?, youtube_video_id), 
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """, (yt_url, yt_id, video_id))
+        conn.commit()
+    finally:
+        conn.close()
+
 def mark_video_failed(video_id, error_msg):
     conn = get_connection()
     cursor = conn.cursor()
@@ -232,6 +273,7 @@ def get_all_channels():
         SELECT 
             c.*,
             (SELECT COUNT(*) FROM videos v WHERE v.channel_id = c.id) as video_count,
+            (SELECT COUNT(*) FROM videos v WHERE v.channel_id = c.id AND v.is_short = 1) as shorts_count,
             (SELECT COUNT(*) FROM videos v WHERE v.channel_id = c.id AND v.status = 'SCHEDULED') as scheduled_count,
             (SELECT COUNT(*) FROM videos v WHERE v.channel_id = c.id AND v.status = 'PUBLISHED') as published_count
         FROM channels c
@@ -343,7 +385,9 @@ def update_channel(channel_id: int, **fields):
             "channel_name", "handle", "profile_dir", "logo_path", "watermark_text",
             "thumbnail_style", "thumbnail_mood", "thumbnail_prompt_template",
             "schedule_frequency", "schedule_interval_days", "shorts_schedule_times",
-            "long_schedule_times", "is_active", "is_authenticated"
+            "long_schedule_times", "is_active", "is_authenticated",
+            "show_logo", "logo_position", "logo_size", "logo_opacity",
+            "show_outro", "outro_duration_sec"
         }
         updates = []
         params = []
@@ -457,6 +501,7 @@ def get_stats(channel_id=None):
             SUM(CASE WHEN status = 'SCANNED' THEN 1 ELSE 0 END) as pending_ai,
             SUM(CASE WHEN status = 'METADATA_READY' THEN 1 ELSE 0 END) as ready_to_schedule,
             SUM(CASE WHEN status = 'SCHEDULED' THEN 1 ELSE 0 END) as scheduled,
+            SUM(CASE WHEN status = 'PUBLISHED' THEN 1 ELSE 0 END) as published,
             SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) as failed
         FROM videos
         {where}

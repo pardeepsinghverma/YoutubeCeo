@@ -9,7 +9,7 @@ if sys.stderr and hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 from config import SHORTS_SCHEDULE_TIMES, LONG_SCHEDULE_TIMES
-from db import get_connection, mark_video_scheduled, mark_video_failed, get_videos_by_status
+from db import get_connection, mark_video_scheduled, mark_video_published, mark_video_failed, get_videos_by_status
 from yt_uploader import upload_and_schedule_video
 from log_manager import log_upload
 from channel_settings import get_channel_settings
@@ -112,7 +112,7 @@ def assign_schedule_slots(
         params = []
 
         if channel_id:
-            where_clauses.append("channel_id = ?")
+            where_clauses.append("(channel_id = ? OR channel_id IS NULL OR channel_id = 1)")
             params.append(channel_id)
 
         if video_ids:
@@ -148,9 +148,11 @@ def assign_schedule_slots(
                 UPDATE videos 
                 SET scheduled_datetime = ?, 
                     status = CASE WHEN status = 'FAILED' THEN 'METADATA_READY' ELSE status END,
+                    channel_id = COALESCE(?, channel_id),
                     updated_at = CURRENT_TIMESTAMP 
                 WHERE id = ?
-            """, (item["scheduled_datetime"], item["id"]))
+            """, (item["scheduled_datetime"], channel_id, item["id"]))
+            item["channel_id"] = channel_id
             assigned_items.append(item)
 
         conn.commit()
@@ -204,12 +206,32 @@ def upload_single_video(video_id: int, headless: bool = False, channel_id: int =
     hashtags = json.loads(item["hashtags"]) if item.get("hashtags") else []
     sched_dt = item["scheduled_datetime"]
     is_short = bool(item["is_short"])
-    assigned_channel_id = channel_id or item.get("channel_id")
+    
+    # Priority: explicitly passed channel_id -> active channel -> video's channel_id
+    assigned_channel_id = channel_id
+    if not assigned_channel_id:
+        try:
+            from db import get_active_channel
+            act = get_active_channel()
+            if act:
+                assigned_channel_id = act["id"]
+        except Exception:
+            pass
+    if not assigned_channel_id:
+        assigned_channel_id = item.get("channel_id") or 1
 
-    # If no scheduled datetime, assign default tomorrow 11:00
+    # Keep video record in sync with assigned channel
+    try:
+        conn = get_connection()
+        conn.cursor().execute("UPDATE videos SET channel_id = ? WHERE id = ?", (assigned_channel_id, video_id))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+    # If no scheduled datetime, keep as None (will be published immediately as Public)
     if not sched_dt:
-        tomorrow = datetime.now() + timedelta(days=1)
-        sched_dt = tomorrow.strftime("%Y-%m-%d 11:00")
+        sched_dt = None
 
     # Check or auto-generate custom thumbnail
     thumb_path = item.get("thumbnail_path")
@@ -237,7 +259,16 @@ def upload_single_video(video_id: int, headless: bool = False, channel_id: int =
             channel_id=assigned_channel_id
         )
         yt_url = res.get("url", "")
-        mark_video_scheduled(video_id, sched_dt, yt_url=yt_url)
+        is_published = res.get("published_immediately", False)
+        final_status = "PUBLISHED" if is_published else "SCHEDULED"
+
+        if is_published:
+            mark_video_published(video_id, yt_url=yt_url)
+            print(f"[OK] Video #{video_id} successfully published LIVE immediately on YouTube!")
+        else:
+            mark_video_scheduled(video_id, sched_dt, yt_url=yt_url)
+            print(f"[OK] Video #{video_id} successfully scheduled on YouTube for {sched_dt}!")
+
         log_upload(
             video_id=video_id,
             file_name=file_path.name,
@@ -249,9 +280,9 @@ def upload_single_video(video_id: int, headless: bool = False, channel_id: int =
             hashtags=hashtags,
             scheduled_datetime=sched_dt,
             youtube_url=yt_url,
-            status="SUCCESS"
+            status=final_status
         )
-        return {"status": "SUCCESS", "video_id": video_id, "youtube_url": yt_url, "scheduled_datetime": sched_dt}
+        return {"status": final_status, "video_id": video_id, "youtube_url": yt_url, "scheduled_datetime": sched_dt, "published_immediately": is_published}
     except Exception as e:
         import traceback
         tb_str = traceback.format_exc()
@@ -274,28 +305,44 @@ def upload_single_video(video_id: int, headless: bool = False, channel_id: int =
         )
         raise e
 
-def process_upload_queue(limit: int = 1, headless: bool = False):
+def process_upload_queue(limit: int = 1, headless: bool = False, channel_id: int = None):
     """
     Uploads the next N ready videos into YouTube Studio and sets their schedule.
     """
+    if not channel_id:
+        try:
+            from db import get_active_channel
+            act = get_active_channel()
+            if act:
+                channel_id = act["id"]
+        except Exception:
+            pass
+
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("""
+        where = "status = 'METADATA_READY' AND scheduled_datetime IS NOT NULL"
+        params = []
+        if channel_id:
+            where += " AND (channel_id = ? OR channel_id IS NULL)"
+            params.append(channel_id)
+        params.append(limit)
+
+        cursor.execute(f"""
         SELECT * FROM videos 
-        WHERE status = 'METADATA_READY' AND scheduled_datetime IS NOT NULL 
+        WHERE {where}
         ORDER BY scheduled_datetime ASC 
         LIMIT ?
-        """, (limit,))
+        """, params)
         items = [dict(row) for row in cursor.fetchall()]
     finally:
         conn.close()
 
     if not items:
-        print("[*] No videos waiting in the upload queue.")
+        print(f"[*] No videos waiting in the upload queue for Channel #{channel_id or 'Any'}.")
         return
 
-    print(f"[*] Processing {len(items)} video(s) for automated upload...")
+    print(f"[*] Processing {len(items)} video(s) for automated upload (Channel #{channel_id})...")
     for item in items:
         vid_id = item["id"]
         file_path = Path(item["file_path"])
@@ -326,10 +373,20 @@ def process_upload_queue(limit: int = 1, headless: bool = False):
                 schedule_dt_str=sched_dt,
                 headless=headless,
                 thumbnail_path=Path(thumb_path) if thumb_path else None,
-                video_id=vid_id
+                video_id=vid_id,
+                channel_id=channel_id or item.get("channel_id")
             )
             yt_url = res.get("url", "")
-            mark_video_scheduled(vid_id, sched_dt, yt_url=yt_url)
+            is_published = res.get("published_immediately", False)
+            final_status = "PUBLISHED" if is_published else "SCHEDULED"
+
+            if is_published:
+                mark_video_published(vid_id, yt_url=yt_url)
+                print(f"[OK] Video #{vid_id} successfully published LIVE immediately on YouTube!")
+            else:
+                mark_video_scheduled(vid_id, sched_dt, yt_url=yt_url)
+                print(f"[OK] Video #{vid_id} successfully scheduled on YouTube for {sched_dt}!")
+
             log_upload(
                 video_id=vid_id,
                 file_name=file_path.name,
@@ -341,9 +398,8 @@ def process_upload_queue(limit: int = 1, headless: bool = False):
                 hashtags=hashtags,
                 scheduled_datetime=sched_dt,
                 youtube_url=yt_url,
-                status="SUCCESS"
+                status=final_status
             )
-            print(f"[OK] Video #{vid_id} successfully scheduled on YouTube for {sched_dt}!")
         except Exception as e:
             import traceback
             tb_str = traceback.format_exc()
@@ -369,13 +425,23 @@ if __name__ == "__main__":
     if len(sys.argv) > 2 and sys.argv[1] == "upload":
         target_vid_id = int(sys.argv[2])
         is_headless = "--headless" in sys.argv
-        print(f"[*] CLI: Executing isolated single video upload for #{target_vid_id} (headless={is_headless})...")
-        res = upload_single_video(target_vid_id, headless=is_headless)
+        cli_channel_id = None
+        if "--channel" in sys.argv:
+            idx = sys.argv.index("--channel")
+            if idx + 1 < len(sys.argv) and sys.argv[idx + 1].isdigit():
+                cli_channel_id = int(sys.argv[idx + 1])
+        print(f"[*] CLI: Executing isolated single video upload for #{target_vid_id} (Channel #{cli_channel_id or 'Active'}, headless={is_headless})...")
+        res = upload_single_video(target_vid_id, headless=is_headless, channel_id=cli_channel_id)
         print(f"[OK] CLI: Completed upload for #{target_vid_id}: {res}")
     elif len(sys.argv) > 1 and sys.argv[1] == "queue":
         limit = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 1
         is_headless = "--headless" in sys.argv
-        print(f"[*] CLI: Executing isolated queue upload (limit={limit}, headless={is_headless})...")
-        process_upload_queue(limit=limit, headless=is_headless)
+        cli_channel_id = None
+        if "--channel" in sys.argv:
+            idx = sys.argv.index("--channel")
+            if idx + 1 < len(sys.argv) and sys.argv[idx + 1].isdigit():
+                cli_channel_id = int(sys.argv[idx + 1])
+        print(f"[*] CLI: Executing isolated queue upload (limit={limit}, Channel #{cli_channel_id or 'Active'}, headless={is_headless})...")
+        process_upload_queue(limit=limit, headless=is_headless, channel_id=cli_channel_id)
     else:
         assign_schedule_slots()

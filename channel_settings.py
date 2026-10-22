@@ -38,41 +38,126 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     )
 }
 
-def get_channel_settings() -> Dict[str, Any]:
+def get_channel_settings(channel_id: int = None) -> Dict[str, Any]:
     """
-    Reads channel branding and outro settings from JSON, returning defaults if not created.
+    Reads channel branding, outro, thumbnail, and scheduling settings.
+    Single Source of Truth: Reads directly from the channels table in SQLite
+    for the specified channel_id or the currently active channel.
     """
-    if not SETTINGS_FILE.exists():
-        save_channel_settings(DEFAULT_SETTINGS)
-        return DEFAULT_SETTINGS.copy()
     try:
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        merged = DEFAULT_SETTINGS.copy()
-        merged.update(data)
-        return merged
+        from db import get_channel_by_id, get_active_channel
+        ch = get_channel_by_id(channel_id) if channel_id else get_active_channel()
+        if ch:
+            shorts_times = json.loads(ch["shorts_schedule_times"]) if isinstance(ch.get("shorts_schedule_times"), str) else (ch.get("shorts_schedule_times") or ["11:00", "17:00"])
+            long_times = json.loads(ch["long_schedule_times"]) if isinstance(ch.get("long_schedule_times"), str) else (ch.get("long_schedule_times") or ["19:30"])
+            
+            cfg = DEFAULT_SETTINGS.copy()
+            cfg.update({
+                "channel_id": ch["id"],
+                "channel_name": ch.get("channel_name") or DEFAULT_SETTINGS["channel_name"],
+                "handle": ch.get("handle", ""),
+                "profile_dir": ch.get("profile_dir", ""),
+                "logo_path": ch.get("logo_path", ""),
+                "show_logo": bool(ch.get("show_logo", True if ch.get("logo_path") else False)),
+                "logo_position": ch.get("logo_position", "top_right"),
+                "logo_size": ch.get("logo_size", 110),
+                "logo_opacity": ch.get("logo_opacity", 0.9),
+                "show_outro": bool(ch.get("show_outro", True)),
+                "watermark_text": ch.get("watermark_text") or f"Watch next part on {ch.get('channel_name', 'our channel')}",
+                "outro_text_template": ch.get("watermark_text") or "Watch next part on {channel_name}",
+                "outro_duration_sec": ch.get("outro_duration_sec", 3.5),
+                "thumbnail_art_style": ch.get("thumbnail_style") or DEFAULT_SETTINGS["thumbnail_art_style"],
+                "thumbnail_mood": ch.get("thumbnail_mood") or DEFAULT_SETTINGS["thumbnail_mood"],
+                "thumbnail_prompt_template": ch.get("thumbnail_prompt_template") or DEFAULT_SETTINGS["thumbnail_prompt_template"],
+                "schedule_frequency": ch.get("schedule_frequency", "daily"),
+                "schedule_interval_days": ch.get("schedule_interval_days", 1),
+                "shorts_schedule_times": shorts_times,
+                "long_schedule_times": long_times,
+                "is_active": bool(ch.get("is_active", 0)),
+                "is_authenticated": bool(ch.get("is_authenticated", 0))
+            })
+            return cfg
     except Exception as e:
-        print(f"[!] Error reading channel_settings.json: {e}")
-        return DEFAULT_SETTINGS.copy()
+        print(f"[!] Warning reading channel settings from SQLite: {e}")
 
-def save_channel_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
+    # Fallback to file/defaults if DB not available
+    if SETTINGS_FILE.exists():
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            merged = DEFAULT_SETTINGS.copy()
+            merged.update(data)
+            return merged
+        except Exception:
+            pass
+    return DEFAULT_SETTINGS.copy()
+
+def save_channel_settings(settings: Dict[str, Any], channel_id: int = None) -> Dict[str, Any]:
     """
-    Persists updated channel branding settings to JSON file.
+    Persists updated channel branding, scheduling, and outro settings directly
+    to the active channel (or specified channel_id) in SQLite.
     """
-    current = get_channel_settings() if SETTINGS_FILE.exists() else DEFAULT_SETTINGS.copy()
+    try:
+        from db import get_channel_by_id, get_active_channel, update_channel
+        target_ch = get_channel_by_id(channel_id) if channel_id else get_active_channel()
+        if target_ch:
+            cid = target_ch["id"]
+            db_updates = {}
+            mapping = {
+                "channel_name": "channel_name",
+                "handle": "handle",
+                "logo_path": "logo_path",
+                "watermark_text": "watermark_text",
+                "outro_text_template": "watermark_text",
+                "thumbnail_art_style": "thumbnail_style",
+                "thumbnail_style": "thumbnail_style",
+                "thumbnail_mood": "thumbnail_mood",
+                "thumbnail_prompt_template": "thumbnail_prompt_template",
+                "schedule_frequency": "schedule_frequency",
+                "schedule_interval_days": "schedule_interval_days",
+                "shorts_schedule_times": "shorts_schedule_times",
+                "long_schedule_times": "long_schedule_times",
+                "show_logo": "show_logo",
+                "logo_position": "logo_position",
+                "logo_size": "logo_size",
+                "logo_opacity": "logo_opacity",
+                "show_outro": "show_outro",
+                "outro_duration_sec": "outro_duration_sec"
+            }
+            for k, col in mapping.items():
+                if k in settings:
+                    db_updates[col] = settings[k]
+
+            if db_updates:
+                update_channel(cid, **db_updates)
+
+            # Also sync to JSON file as fallback
+            try:
+                current_cfg = get_channel_settings(cid)
+                with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(current_cfg, f, indent=2, ensure_ascii=False)
+            except Exception:
+                pass
+
+            return get_channel_settings(cid)
+    except Exception as e:
+        print(f"[!] Error saving channel settings to SQLite: {e}")
+
+    # Fallback to local file
+    current = DEFAULT_SETTINGS.copy()
     current.update(settings)
     try:
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(current, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        print(f"[!] Error saving channel_settings.json: {e}")
+    except Exception:
+        pass
     return current
 
-def get_formatted_outro_text(channel_name: str = "") -> str:
+def get_formatted_outro_text(channel_name: str = "", channel_id: int = None) -> str:
     """
     Returns the goodbye/outro text using the template and channel name.
     """
-    cfg = get_channel_settings()
+    cfg = get_channel_settings(channel_id=channel_id)
     c_name = channel_name.strip() or cfg.get("channel_name", "").strip() or "Our Channel"
     template = cfg.get("outro_text_template", "Watch next part on {channel_name}")
     if "{channel_name}" in template:

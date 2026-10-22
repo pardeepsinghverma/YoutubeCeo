@@ -38,12 +38,12 @@ def get_thumbnail_font(size: int):
                 pass
     return ImageFont.load_default()
 
-def generate_visual_prompt_with_gemini(title: str, description: str = "", is_short: bool = True, part_number: int = None) -> str:
+def generate_visual_prompt_with_gemini(title: str, description: str = "", is_short: bool = True, part_number: int = None, channel_id: int = None) -> str:
     """
     Analyzes story title, description, and part number to create a high-CTR,
     premium 3D animated visual prompt matching the user's detailed art direction.
     """
-    cfg = get_channel_settings()
+    cfg = get_channel_settings(channel_id=channel_id)
     channel_name = cfg.get("channel_name", "Lil Kido Stories").strip() or "Lil Kido Stories"
     part_str = f"Part {part_number} of " if part_number else ""
     format_label = "9:16 vertical mobile Reel/Shorts poster (720x1280)" if is_short else "16:9 widescreen YouTube video thumbnail (1280x720)"
@@ -129,7 +129,8 @@ def composite_branding_and_save(
     is_short: bool = True,
     part_number: int = None,
     output_path: Path = None,
-    visual_prompt: str = None
+    visual_prompt: str = None,
+    channel_id: int = None
 ) -> Path:
     """
     Composites high-contrast 'PART X' badge, Channel Logo, and top/bottom shadows
@@ -161,7 +162,7 @@ def composite_branding_and_save(
         draw.line([(0, y), (target_w, y)], fill=(0, 0, 0, alpha))
 
     # 1. Overlay Channel Logo
-    settings = get_channel_settings()
+    settings = get_channel_settings(channel_id=channel_id)
     logo_path = settings.get("logo_path")
     if settings.get("show_logo", True) and logo_path and Path(logo_path).exists():
         try:
@@ -245,7 +246,8 @@ def generate_thumbnail_image(
     part_number: int = None,
     force_ai: bool = True,
     output_path: Path = None,
-    custom_prompt: str = None
+    custom_prompt: str = None,
+    channel_id: int = None
 ) -> Path:
     """
     Middleware: Generates AI thumbnail using rich prompt, overlays 'Part' badge and Channel Logo,
@@ -260,7 +262,7 @@ def generate_thumbnail_image(
         output_path = THUMBNAILS_DIR / f"thumb_{video_id}_{tag}.jpg"
 
     visual_prompt = custom_prompt or generate_visual_prompt_with_gemini(
-        title=title, description=description, is_short=is_short, part_number=part_number
+        title=title, description=description, is_short=is_short, part_number=part_number, channel_id=channel_id
     )
     print(f"[*] Visual Prompt for #{video_id}: {visual_prompt[:80]}...")
 
@@ -304,7 +306,8 @@ def generate_thumbnail_image(
         is_short=is_short,
         part_number=part_number,
         output_path=output_path,
-        visual_prompt=visual_prompt
+        visual_prompt=visual_prompt,
+        channel_id=channel_id
     )
 
 def get_or_create_thumbnail_prompt(video_id: int) -> dict:
@@ -322,13 +325,15 @@ def get_or_create_thumbnail_prompt(video_id: int) -> dict:
     finally:
         conn.close()
 
+    channel_id = v.get("channel_id")
     prompt = v.get("thumbnail_prompt")
     if not prompt or len(prompt) < 25:
         prompt = generate_visual_prompt_with_gemini(
             title=v.get("title") or v.get("file_name", ""),
             description=v.get("description", ""),
             is_short=bool(v.get("is_short", 1)),
-            part_number=v.get("part_number")
+            part_number=v.get("part_number"),
+            channel_id=channel_id
         )
         update_video_thumbnail(video_id, v.get("thumbnail_path"), prompt)
 
@@ -341,7 +346,7 @@ def get_or_create_thumbnail_prompt(video_id: int) -> dict:
         "thumbnail_path": v.get("thumbnail_path")
     }
 
-def generate_thumbnail_for_video_id(video_id: int, force: bool = False) -> Optional[Path]:
+def generate_thumbnail_for_video_id(video_id: int, force: bool = False, channel_id: int = None) -> Optional[Path]:
     """
     Helper to look up video details in DB and generate its custom thumbnail.
     """
@@ -360,13 +365,16 @@ def generate_thumbnail_for_video_id(video_id: int, force: bool = False) -> Optio
     if not force and existing_thumb and Path(existing_thumb).exists():
         return Path(existing_thumb)
 
+    target_channel_id = channel_id or v.get("channel_id")
+
     return generate_thumbnail_image(
         video_id=v["id"],
         video_path=Path(v["file_path"]),
         title=v["title"] or v["file_name"],
         description=v["description"] or "",
         is_short=bool(v["is_short"]),
-        part_number=v.get("part_number")
+        part_number=v.get("part_number"),
+        channel_id=target_channel_id
     )
 
 def generate_all_missing_thumbnails(target_type: str = "SHORTS") -> int:
