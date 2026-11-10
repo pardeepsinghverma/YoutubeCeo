@@ -1,4 +1,4 @@
-# AI Agent Operational Rules & Guidelines
+# AI Agent Operational Rules & Guidelines — YoutubeCeo
 
 > [!IMPORTANT]
 > **CRITICAL RULE FOR ALL AI AGENTS**:
@@ -42,3 +42,25 @@
   - Any long-running subprocess must assign its handle to `CURRENT_WORKER_PROC`.
   - Check `AUTO_UPLOAD_STOP` periodically in sequential loops.
   - Endpoint `POST /api/worker/stop` must terminate `CURRENT_WORKER_PROC`, stop orphan Chrome instances, and set `WORKER_STATE["is_busy"] = False`.
+
+---
+
+## 2. Directory Layout & Key Files
+
+- `dashboard.py`: FastAPI server, REST API, worker daemon, and background task handlers.
+- `db.py`: SQLite persistence layer, multi-channel logic, telegram config, and competitor discovery tables.
+- `shorts_generator.py`: Video slicing, NVENC hardware detection, Gemini AI Hinglish subtitles, ASS subtitle styling.
+- `yt_uploader.py`: Playwright browser automation for YouTube Studio scheduling.
+- `yt_auth.py`: Direct Chrome launch and login flow for Google Account authentication.
+- `scheduler.py`: Calendar drip-schedule calculation, slot assignment, and queue processing.
+- `channel_manager.py`: Multi-tenant Chrome profile manager and session cookie heartbeat.
+- `channel_settings.py`: Channel branding, logo watermark, outro settings, and thumbnail art prompts.
+- `media_inspector.py`: Video telemetry analysis (ffprobe, duration, aspect ratio, audio extraction).
+- `media_evasion.py`: NVIDIA NVENC hardware detection and anti-fingerprint acoustic/visual filters.
+- `discovery_engine.py`: Competitor radar, yt-dlp flat playlist scraping, view velocity metrics.
+- `master_autopilot.py`: Complete autonomous ingestion-to-upload pipeline orchestrator.
+- `telegram_bot.py`: Telegram Bot HITL (human-in-the-loop) review cards and remote control.
+- `ai_seo.py`: Multimodal SEO metadata generation with Gemini.
+- `thumbnail_generator.py`: 3D Pixar animated AI thumbnail prompts & Pillow compositing.
+- `log_manager.py`: Real-time structured activity logging and live upload step telemetry.
+- `templates/index.html`: Responsive SPA dashboard (Pagination, Toast Engine, 7-Day Calendar Board, Bulk Actions, Stepper HUD).

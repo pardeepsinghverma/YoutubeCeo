@@ -142,6 +142,21 @@ def init_db():
     except Exception:
         pass
 
+    # Telegram HITL Configuration Table
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS telegram_config (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        bot_token TEXT DEFAULT '',
+        chat_id TEXT DEFAULT '',
+        is_enabled BOOLEAN DEFAULT 0,
+        notify_on_ready BOOLEAN DEFAULT 1,
+        notify_on_upload BOOLEAN DEFAULT 1,
+        auto_approve BOOLEAN DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    ''')
+
     # Seed default channel from existing channel_settings if table is empty
     cursor.execute("SELECT COUNT(*) FROM channels")
     if cursor.fetchone()[0] == 0:
@@ -858,6 +873,52 @@ def delete_discovery_video(video_id: int) -> bool:
 
         conn.commit()
         return deleted
+    finally:
+        conn.close()
+
+# ==============================================================================
+# Telegram HITL Configuration Persistence Layer
+# ==============================================================================
+
+def get_telegram_config() -> Dict[str, Any]:
+    """
+    Retrieves Telegram Bot HITL configuration for human-in-the-loop review cards.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM telegram_config WHERE id = 1")
+        row = cursor.fetchone()
+        if not row:
+            cursor.execute("INSERT OR IGNORE INTO telegram_config (id, bot_token, chat_id, is_enabled) VALUES (1, '', '', 0)")
+            conn.commit()
+            cursor.execute("SELECT * FROM telegram_config WHERE id = 1")
+            row = cursor.fetchone()
+        return dict(row) if row else {}
+    finally:
+        conn.close()
+
+def save_telegram_config(bot_token: str, chat_id: str, is_enabled: bool = False, notify_on_ready: bool = True, notify_on_upload: bool = True, auto_approve: bool = False) -> bool:
+    """
+    Upserts Telegram Bot HITL configuration.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+        INSERT INTO telegram_config (id, bot_token, chat_id, is_enabled, notify_on_ready, notify_on_upload, auto_approve, updated_at)
+        VALUES (1, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(id) DO UPDATE SET
+            bot_token = excluded.bot_token,
+            chat_id = excluded.chat_id,
+            is_enabled = excluded.is_enabled,
+            notify_on_ready = excluded.notify_on_ready,
+            notify_on_upload = excluded.notify_on_upload,
+            auto_approve = excluded.auto_approve,
+            updated_at = CURRENT_TIMESTAMP
+        """, (bot_token, chat_id, 1 if is_enabled else 0, 1 if notify_on_ready else 0, 1 if notify_on_upload else 0, 1 if auto_approve else 0))
+        conn.commit()
+        return True
     finally:
         conn.close()
 
