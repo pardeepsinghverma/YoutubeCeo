@@ -1,18 +1,18 @@
 {
-  "channel_name": "Pupu Popi",
+  "channel_name": "Lil kido stories",
   "logo_path": "",
   "show_logo": true,
   "logo_position": "top_right",
   "logo_size": 110,
   "logo_opacity": 0.9,
   "show_outro": true,
-  "outro_text_template": "Pupu Popi",
+  "outro_text_template": "Watch next part on Lil kido stories",
   "outro_duration_sec": 3.5,
   "schedule_frequency": "daily",
   "schedule_interval_days": 1,
   "shorts_schedule_times": [
-    "12:00",
-    "18:00"
+    "11:00",
+    "17:00"
   ],
   "long_schedule_times": [
     "19:30"
@@ -20,11 +20,12 @@
   "schedule_start_days_ahead": 1,
   "thumbnail_art_style": "3D Pixar Animation",
   "thumbnail_mood": "Joyful, safe, playful, magical, full of adventure",
-  "thumbnail_prompt_template": "Create a vibrant, adorable, high-quality 3D animated YouTube thumbnail for a kids' storytelling channel called “{channel_name}”. Show cute cartoon characters with big expressive eyes, cheerful smiles, and playful outfits, surrounded by a magical fairytale storybook world matching the story scene. Use a premium Pixar-inspired 3D animation aesthetic, soft rounded character designs, bright candy colors, cinematic rim lighting, rich details, and a dreamy fairytale atmosphere. Make the characters large and clearly visible, with expressive faces that instantly grab children's attention. Use a colorful, uncluttered composition with strong contrast, soft depth of field, and a polished professional YouTube thumbnail look. Target audience: children aged 3–8 and family. The overall mood should feel joyful, safe, playful, magical, and full of adventure. No scary characters, no dark atmosphere, no photorealism, no clutter, no watermark.",
-  "channel_id": 2,
-  "handle": "@PupuPopi",
-  "profile_dir": "C:\\ReactNative\\Personal\\uploader\\chrome_profiles\\bedtime_tales_9d6772",
-  "watermark_text": "Pupu Popi",
+  "thumbnail_prompt_template": "Create a vibrant, adorable, high-quality 3D animated YouTube thumbnail for a kids' storytelling channel called \u201c{channel_name}\u201d. Show cute cartoon characters with big expressive eyes, cheerful smiles, and playful outfits, surrounded by a magical fairytale storybook world matching the story scene. Use a premium Pixar-inspired 3D animation aesthetic, soft rounded character designs, bright candy colors, cinematic rim lighting, rich details, and a dreamy fairytale atmosphere. Make the characters large and clearly visible, with expressive faces that instantly grab children's attention. Use a colorful, uncluttered composition with strong contrast, soft depth of field, and a polished professional YouTube thumbnail look. Target audience: children aged 3\u20138 and family. The overall mood should feel joyful, safe, playful, magical, and full of adventure. No scary characters, no dark atmosphere, no photorealism, no clutter, no watermark.",
+  "channel_id": 1,
+  "handle": "@LilKidoStories",
+  "profile_dir": "",
+  "watermark_text": "Watch next part on Lil kido stories",
+  "raw_folder_path": "",
   "is_active": true,
   "is_authenticated": true
 }

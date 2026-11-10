@@ -20,7 +20,7 @@ def inspect_video(video_path: Path):
     
     # Run ffmpeg -i <path> to capture stderr info
     cmd = [FFMPEG_PATH, "-i", str(video_path)]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace")
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
     output = result.stderr
 
     # Parse duration: Duration: 00:01:23.45,

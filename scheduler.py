@@ -269,6 +269,14 @@ def upload_single_video(video_id: int, headless: bool = False, channel_id: int =
             mark_video_scheduled(video_id, sched_dt, yt_url=yt_url)
             print(f"[OK] Video #{video_id} successfully scheduled on YouTube for {sched_dt}!")
 
+        # Telegram HITL notification dispatch
+        try:
+            import asyncio
+            from telegram_bot import notify_upload_event
+            asyncio.run(notify_upload_event(video_id, final_status, yt_url=yt_url))
+        except Exception:
+            pass
+
         log_upload(
             video_id=video_id,
             file_name=file_path.name,
@@ -303,6 +311,12 @@ def upload_single_video(video_id: int, headless: bool = False, channel_id: int =
             status="FAILED",
             error_message=full_err
         )
+        try:
+            import asyncio
+            from telegram_bot import notify_upload_event
+            asyncio.run(notify_upload_event(video_id, "FAILED", error_msg=err_msg))
+        except Exception:
+            pass
         raise e
 
 def process_upload_queue(limit: int = 1, headless: bool = False, channel_id: int = None):

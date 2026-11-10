@@ -73,6 +73,7 @@ def get_channel_settings(channel_id: int = None) -> Dict[str, Any]:
                 "schedule_interval_days": ch.get("schedule_interval_days", 1),
                 "shorts_schedule_times": shorts_times,
                 "long_schedule_times": long_times,
+                "raw_folder_path": ch.get("raw_folder_path", ""),
                 "is_active": bool(ch.get("is_active", 0)),
                 "is_authenticated": bool(ch.get("is_authenticated", 0))
             })
@@ -122,7 +123,8 @@ def save_channel_settings(settings: Dict[str, Any], channel_id: int = None) -> D
                 "logo_size": "logo_size",
                 "logo_opacity": "logo_opacity",
                 "show_outro": "show_outro",
-                "outro_duration_sec": "outro_duration_sec"
+                "outro_duration_sec": "outro_duration_sec",
+                "raw_folder_path": "raw_folder_path"
             }
             for k, col in mapping.items():
                 if k in settings:

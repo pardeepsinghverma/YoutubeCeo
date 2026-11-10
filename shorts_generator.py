@@ -17,6 +17,7 @@ from config import FFMPEG_PATH, BASE_DIR
 from db import add_video, update_video_metadata, get_connection
 from media_inspector import inspect_video
 from channel_settings import get_channel_settings
+from media_evasion import detect_hardware_encoder, build_anti_fingerprint_audio_filter
 
 load_dotenv()
 
@@ -449,15 +450,34 @@ def render_vertical_short(
                 f"[vtxt]subtitles='{safe_ass_path}'[vout]"
             )
 
+        encoder_name, encoder_flags = detect_hardware_encoder()
+        audio_evasion = build_anti_fingerprint_audio_filter(speed_factor=1.035)
+
+        # Check if video has audio stream to safely apply acoustic evasion
+        has_audio = True
+        try:
+            meta = inspect_video(video_path)
+            has_audio = bool(meta.get("has_audio", True))
+        except Exception:
+            has_audio = True
+
+        if has_audio:
+            filter_complex += f";[0:a]{audio_evasion}[aout]"
+            audio_map = ["-map", "[aout]", "-c:a", "aac", "-b:a", "128k"]
+        else:
+            audio_map = []
+
         cmd = inputs + [
             "-filter_complex", filter_complex,
-            "-map", "[vout]", "-map", "0:a?",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "128k",
+            "-map", "[vout]"
+        ] + audio_map + [
+            "-c:v", encoder_name
+        ] + encoder_flags + [
+            "-pix_fmt", "yuv420p",
             str(output_path)
         ]
 
-        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
         if res.returncode != 0:
             print(f"[!] FFmpeg render error: {res.stderr[-400:]}")
             return False
@@ -590,6 +610,14 @@ def create_shorts_from_video(
                 generate_thumbnail_for_video_id(row_id)
             except Exception as th_err:
                 print(f"[-] Note: Thumbnail generation note for Part {part_idx}: {th_err}")
+
+            # Dispatch Telegram HITL review card
+            try:
+                import asyncio
+                from telegram_bot import send_video_review_card
+                asyncio.run(send_video_review_card(row_id))
+            except Exception:
+                pass
 
             print(f"[OK] Created Short Part {part_idx}: {output_file.name} (DB ID #{row_id})")
             audio_temp.unlink(missing_ok=True)

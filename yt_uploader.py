@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 import json
@@ -21,7 +22,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 from config import CHROME_PROFILE_DIR, BASE_DIR
 from log_manager import step_log
 
-STANDARD_CHROME_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+STANDARD_CHROME_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
 
 def upload_and_schedule_video(
     video_path: Path,
@@ -103,31 +104,65 @@ def upload_and_schedule_video(
         chrome_exe = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
         use_channel = "chrome" if chrome_exe.exists() else None
 
-        browser_context = p.chromium.launch_persistent_context(
-            user_data_dir=str(target_profile_dir),
-            headless=headless,
-            channel=use_channel,
-            user_agent=STANDARD_CHROME_UA,
-            ignore_default_args=["--enable-automation"],
-            args=[
+        # Optional proxy configuration per blueprint
+        proxy_server = os.getenv("YOUTUBE_PROXY", "").strip()
+        proxy_arg = {"server": proxy_server} if proxy_server else None
+
+        # Clean up stale locks if profile was abruptly terminated
+        for lf_name in ["lockfile", "SingletonLock", "SingletonSocket", "SingletonCookie"]:
+            lf = target_profile_dir / lf_name
+            if lf.exists():
+                try:
+                    lf.unlink()
+                except Exception:
+                    pass
+
+        launch_kwargs = {
+            "user_data_dir": str(target_profile_dir),
+            "headless": headless,
+            "channel": use_channel,
+            "user_agent": STANDARD_CHROME_UA,
+            "ignore_default_args": ["--enable-automation"],
+            "args": [
                 "--disable-blink-features=AutomationControlled",
                 "--start-maximized",
                 "--no-sandbox",
                 "--disable-infobars"
             ]
-        )
+        }
+        if proxy_arg:
+            launch_kwargs["proxy"] = proxy_arg
+            step_log(f"Routing browser through proxy: {proxy_server}", level="INFO", video_id=video_id)
+
+        browser_context = p.chromium.launch_persistent_context(**launch_kwargs)
 
         if browser_context.pages:
             page = browser_context.pages[0]
         else:
             page = browser_context.new_page()
+        
+        # Mask automation flag safely without breaking Lit/Polymer custom elements
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
+
         page.set_default_timeout(60000)
 
         # 1. Navigate to YouTube Studio
-        step_log("[Step 2/8] Navigating to https://studio.youtube.com...", level="INFO", video_id=video_id)
-        page.goto("https://studio.youtube.com", wait_until="domcontentloaded")
-        time.sleep(4)
+        step_log("[Step 2/8] Navigating to YouTube Studio...", level="INFO", video_id=video_id)
+        try:
+            page.goto("https://studio.youtube.com/?approve_browser_access=true", wait_until="networkidle", timeout=60000)
+        except Exception:
+            page.goto("https://studio.youtube.com/?approve_browser_access=true", wait_until="domcontentloaded", timeout=60000)
+        time.sleep(3)
+
+        # Handle 'Improve your experience' / unsupported browser interstitial if present
+        try:
+            skip_link = page.locator("a:has-text('Skip to YouTube Studio'), a[href*='approve_browser_access']").first
+            if skip_link.is_visible():
+                step_log("Detected 'Improve your experience' interstitial, bypassing...", level="INFO", video_id=video_id)
+                skip_link.click(force=True)
+                time.sleep(3)
+        except Exception:
+            pass
 
         # Check if login is required
         curr_url = page.url
@@ -137,19 +172,29 @@ def upload_and_schedule_video(
 
         # 2. Click Create / Upload icon
         step_log("[Step 3/8] Opening YouTube Studio upload modal...", level="INFO", video_id=video_id)
+        
+        # Explicitly wait for Studio upload triggers to render into DOM
+        trigger_sel = "button:has-text('Upload videos'), button:has-text('Create'), button[aria-label*='Upload' i], ytcp-button#upload-button, #upload-icon"
+        try:
+            page.wait_for_selector(trigger_sel, timeout=30000)
+        except Exception as sel_w_err:
+            step_log(f"Trigger wait notice: {sel_w_err}", level="WARN", video_id=video_id)
+
         opened = False
 
-        # Check header upload icon first
-        header_icon = page.locator("button[aria-label*='Upload' i], ytcp-icon-button[aria-label*='Upload' i], #upload-icon").first
-        if header_icon.is_visible():
-            step_log("Found header upload icon button, clicking...", level="INFO", video_id=video_id)
-            header_icon.click(force=True)
+        # Attempt A: Center 'Upload videos' button on channel dashboard (fastest & most reliable)
+        center_btn = page.locator("button:has-text('Upload videos'), ytcp-button#upload-button, #upload-button button").first
+        if center_btn.is_visible():
+            step_log("Found center 'Upload videos' button, clicking...", level="INFO", video_id=video_id)
+            center_btn.click(force=True)
             opened = True
-        else:
-            create_btn = page.locator("button:has-text('Create'), ytcp-button-shape:has-text('Create'), button[aria-label='Create']").first
+
+        # Attempt B: Header 'Create' dropdown button
+        if not opened:
+            create_btn = page.locator("button:has-text('Create'), ytcp-button-shape:has-text('Create'), button[aria-label*='Create' i]").first
             if create_btn.is_visible():
                 step_log("Found 'Create' dropdown button, clicking...", level="INFO", video_id=video_id)
-                create_btn.click()
+                create_btn.click(force=True)
                 time.sleep(1.5)
                 upload_item = page.locator("tp-yt-paper-item:has-text('Upload videos'), ytcp-text-menu:has-text('Upload videos'), text='Upload videos', [aria-label*='Upload videos' i]").first
                 if upload_item.is_visible():
@@ -157,16 +202,30 @@ def upload_and_schedule_video(
                     upload_item.click(force=True)
                     opened = True
 
+        # Attempt C: Header upload arrow icon button
         if not opened:
-            center_btn = page.locator("button:has-text('Upload videos'), ytcp-button#upload-button, #upload-button button").first
-            if center_btn.is_visible():
-                step_log("Found center 'Upload videos' button, clicking...", level="INFO", video_id=video_id)
-                center_btn.click(force=True)
+            header_icon = page.locator("button[aria-label*='Upload' i], ytcp-icon-button[aria-label*='Upload' i], #upload-icon").first
+            if header_icon.is_visible():
+                step_log("Found header upload icon button, clicking...", level="INFO", video_id=video_id)
+                header_icon.click(force=True)
                 opened = True
 
-        # Wait for file input element
+        # Wait for file input element to be attached in the DOM
         step_log("Waiting for file input dialog element...", level="INFO", video_id=video_id)
-        page.wait_for_selector("input[type='file']", state="attached", timeout=35000)
+        try:
+            page.wait_for_selector("input[type='file']", state="attached", timeout=20000)
+        except Exception:
+            # Fallback re-click if modal wasn't triggered
+            step_log("Input element not found on first pass, retrying trigger click...", level="WARN", video_id=video_id)
+            fallback_btn = page.locator("button:has-text('Create'), button:has-text('Upload videos')").first
+            if fallback_btn.is_visible():
+                fallback_btn.click(force=True)
+                time.sleep(1)
+                up_item = page.locator("text='Upload videos'").first
+                if up_item.is_visible():
+                    up_item.click(force=True)
+            page.wait_for_selector("input[type='file']", state="attached", timeout=25000)
+
         step_log("[+] Upload modal ready!", level="INFO", video_id=video_id)
 
         # 3. Select Video File

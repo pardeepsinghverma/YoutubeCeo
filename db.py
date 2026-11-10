@@ -1,3 +1,4 @@
+from typing import Optional, List, Dict, Any
 import sqlite3
 import json
 from datetime import datetime
@@ -101,6 +102,45 @@ def init_db():
             cursor.execute(f"ALTER TABLE channels ADD COLUMN {col} {col_type}")
         except Exception:
             pass
+
+    # Competitor Discovery Tables
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS discovery_channels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        channel_url TEXT UNIQUE NOT NULL,
+        channel_name TEXT DEFAULT '',
+        handle TEXT DEFAULT '',
+        subscriber_count INTEGER DEFAULT 0,
+        total_videos INTEGER DEFAULT 0,
+        last_scanned TIMESTAMP DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        channel_id INTEGER DEFAULT 1
+    );
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS discovery_videos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        discovery_channel_id INTEGER,
+        youtube_id TEXT UNIQUE NOT NULL,
+        title TEXT NOT NULL,
+        duration_seconds REAL DEFAULT 0,
+        view_count INTEGER DEFAULT 0,
+        upload_date TEXT DEFAULT '',
+        view_velocity REAL DEFAULT 0.0,
+        thumbnail_url TEXT DEFAULT '',
+        video_url TEXT DEFAULT '',
+        is_short BOOLEAN DEFAULT 0,
+        tags_json TEXT DEFAULT '[]',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(discovery_channel_id) REFERENCES discovery_channels(id) ON DELETE CASCADE
+    );
+    ''')
+
+    try:
+        cursor.execute("ALTER TABLE discovery_channels ADD COLUMN channel_id INTEGER DEFAULT 1")
+    except Exception:
+        pass
 
     # Seed default channel from existing channel_settings if table is empty
     cursor.execute("SELECT COUNT(*) FROM channels")
@@ -239,6 +279,127 @@ def mark_video_failed(video_id, error_msg):
         WHERE id = ?
         """, (error_msg, video_id))
         conn.commit()
+    finally:
+        conn.close()
+
+
+def update_video_status(video_id: int, new_status: str, error_msg: Optional[str] = None):
+    """Updates a video's status (SCANNED, METADATA_READY, SCHEDULED, PUBLISHED, FAILED). Clears last_error for ready/active states."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        status_upper = new_status.strip().upper()
+        if status_upper in ("SCHEDULED", "PUBLISHED", "METADATA_READY", "SCANNED"):
+            cursor.execute("""
+            UPDATE videos 
+            SET status = ?, 
+                last_error = NULL, 
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """, (status_upper, video_id))
+        else:
+            cursor.execute("""
+            UPDATE videos 
+            SET status = ?, 
+                last_error = COALESCE(?, last_error), 
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """, (status_upper, error_msg, video_id))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+def bulk_update_video_status(video_ids: list[int], new_status: str) -> int:
+    """Updates status for all given video IDs. Clears last_error if status is set to METADATA_READY, SCHEDULED, or PUBLISHED. Returns count updated."""
+    if not video_ids:
+        return 0
+    cleaned_ids = list(dict.fromkeys(int(v) for v in video_ids))
+    status_upper = new_status.strip().upper()
+    placeholders = ",".join("?" for _ in cleaned_ids)
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        if status_upper in ("METADATA_READY", "SCHEDULED", "PUBLISHED", "SCANNED"):
+            cursor.execute(
+                f"""
+                UPDATE videos 
+                SET status = ?, 
+                    last_error = NULL, 
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id IN ({placeholders})
+                """,
+                [status_upper] + cleaned_ids
+            )
+        else:
+            cursor.execute(
+                f"""
+                UPDATE videos 
+                SET status = ?, 
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id IN ({placeholders})
+                """,
+                [status_upper] + cleaned_ids
+            )
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+def retry_video_upload(video_id: int):
+    """Resets last_error to NULL and status to METADATA_READY for the video."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+        UPDATE videos 
+        SET status = 'METADATA_READY', 
+            last_error = NULL, 
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """, (int(video_id),))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+def delete_video(video_id: int) -> bool:
+    """Deletes the specified video and any child parts if it is a parent video."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM videos WHERE id = ? OR parent_video_id = ?", (int(video_id), int(video_id)))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+def delete_video_parts(parent_video_id: int) -> int:
+    """Deletes all generated short parts that belong to a specific parent video."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM videos WHERE parent_video_id = ?", (int(parent_video_id),))
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+def bulk_delete_videos(video_ids: list[int]) -> int:
+    """Deletes the specified videos and any sliced children if they are parent videos. Returns count deleted."""
+    if not video_ids:
+        return 0
+    cleaned_ids = list(dict.fromkeys(int(v) for v in video_ids))
+    placeholders = ",".join("?" for _ in cleaned_ids)
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            f"DELETE FROM videos WHERE id IN ({placeholders}) OR parent_video_id IN ({placeholders})",
+            cleaned_ids + cleaned_ids
+        )
+        conn.commit()
+        return cursor.rowcount
     finally:
         conn.close()
 
@@ -508,6 +669,195 @@ def get_stats(channel_id=None):
         """, params)
         row = cursor.fetchone()
         return dict(row) if row else {}
+    finally:
+        conn.close()
+
+# ==============================================================================
+# Competitor Discovery & Ingestion Persistence Layer
+# ==============================================================================
+
+def add_discovery_channel(channel_url: str, channel_name: str, handle: str = "", subscriber_count: int = 0, channel_id: Optional[int] = None) -> int:
+    """
+    Inserts or updates a tracked competitor channel in SQLite.
+    Resolves multi-tenant channel_id dynamically.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        resolved_cid = channel_id
+        if resolved_cid is None:
+            act = get_active_channel()
+            resolved_cid = act["id"] if act else 1
+
+        cursor.execute("""
+        INSERT INTO discovery_channels (channel_url, channel_name, handle, subscriber_count, last_scanned, channel_id)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+        ON CONFLICT(channel_url) DO UPDATE SET
+            channel_name = CASE WHEN excluded.channel_name != '' THEN excluded.channel_name ELSE discovery_channels.channel_name END,
+            handle = CASE WHEN excluded.handle != '' THEN excluded.handle ELSE discovery_channels.handle END,
+            subscriber_count = CASE WHEN excluded.subscriber_count > 0 THEN excluded.subscriber_count ELSE discovery_channels.subscriber_count END,
+            last_scanned = CURRENT_TIMESTAMP,
+            channel_id = COALESCE(excluded.channel_id, discovery_channels.channel_id)
+        """, (channel_url, channel_name, handle or "", subscriber_count, resolved_cid))
+        conn.commit()
+
+        cursor.execute("SELECT id FROM discovery_channels WHERE channel_url = ?", (channel_url,))
+        row = cursor.fetchone()
+        return row["id"] if row else 0
+    finally:
+        conn.close()
+
+def save_discovery_videos(discovery_channel_id: int, items: List[Dict[str, Any]]) -> int:
+    """
+    Saves an array of scraped competitor video metadata items to SQLite.
+    Updates the parent competitor channel's total_videos count.
+    """
+    if not items:
+        return 0
+    conn = get_connection()
+    cursor = conn.cursor()
+    saved = 0
+    try:
+        for item in items:
+            yt_id = item.get("youtube_id")
+            if not yt_id:
+                continue
+            title = item.get("title", "")
+            duration = float(item.get("duration_seconds") or 0)
+            views = int(item.get("view_count") or 0)
+            upload_date = item.get("upload_date") or ""
+            velocity = float(item.get("view_velocity") or 0.0)
+            thumb = item.get("thumbnail_url") or ""
+            v_url = item.get("video_url") or f"https://www.youtube.com/watch?v={yt_id}"
+            is_short = 1 if item.get("is_short") else 0
+            tags = item.get("tags") or []
+            tags_json = json.dumps(tags) if isinstance(tags, (list, dict)) else str(tags)
+
+            cursor.execute("""
+            INSERT INTO discovery_videos (
+                discovery_channel_id, youtube_id, title, duration_seconds, view_count,
+                upload_date, view_velocity, thumbnail_url, video_url, is_short, tags_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(youtube_id) DO UPDATE SET
+                discovery_channel_id = excluded.discovery_channel_id,
+                title = excluded.title,
+                duration_seconds = excluded.duration_seconds,
+                view_count = excluded.view_count,
+                upload_date = excluded.upload_date,
+                view_velocity = excluded.view_velocity,
+                thumbnail_url = excluded.thumbnail_url,
+                video_url = excluded.video_url,
+                is_short = excluded.is_short,
+                tags_json = excluded.tags_json
+            """, (discovery_channel_id, yt_id, title, duration, views, upload_date, velocity, thumb, v_url, is_short, tags_json))
+            saved += 1
+
+        cursor.execute("""
+        UPDATE discovery_channels
+        SET total_videos = (SELECT COUNT(*) FROM discovery_videos WHERE discovery_channel_id = ?)
+        WHERE id = ?
+        """, (discovery_channel_id, discovery_channel_id))
+
+        conn.commit()
+        return saved
+    finally:
+        conn.close()
+
+def get_discovery_channels(channel_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    Returns all tracked competitor channels with their scraped video counts.
+    Filters by multi-tenant channel_id if specified.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        query = """
+        SELECT 
+            dc.*,
+            (SELECT COUNT(*) FROM discovery_videos dv WHERE dv.discovery_channel_id = dc.id) as scraped_video_count
+        FROM discovery_channels dc
+        """
+        params = []
+        if channel_id:
+            query += " WHERE (dc.channel_id = ? OR dc.channel_id IS NULL)"
+            params.append(channel_id)
+        query += " ORDER BY dc.last_scanned DESC, dc.id DESC"
+        cursor.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+def get_top_discovery_videos(limit: int = 50, is_short: Optional[bool] = None, channel_id: Optional[int] = None, parent_channel_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    Queries top performing competitor videos sorted by view velocity and total views.
+    Filters by Shorts vs Long-form and multi-tenant channel scoping.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        scope_cid = parent_channel_id if parent_channel_id is not None else channel_id
+        query = """
+        SELECT 
+            dv.*,
+            dc.channel_name as competitor_name,
+            dc.channel_url as competitor_url,
+            dc.handle as competitor_handle
+        FROM discovery_videos dv
+        JOIN discovery_channels dc ON dv.discovery_channel_id = dc.id
+        WHERE 1=1
+        """
+        params = []
+        if scope_cid:
+            query += " AND (dc.channel_id = ? OR dc.channel_id IS NULL)"
+            params.append(scope_cid)
+        if is_short is not None:
+            query += " AND dv.is_short = ?"
+            params.append(1 if is_short else 0)
+
+        query += " ORDER BY dv.view_velocity DESC, dv.view_count DESC LIMIT ?"
+        params.append(limit)
+        cursor.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+def delete_discovery_channel(channel_id: int) -> bool:
+    """
+    Removes a competitor channel and all its scraped videos.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM discovery_videos WHERE discovery_channel_id = ?", (channel_id,))
+        cursor.execute("DELETE FROM discovery_channels WHERE id = ?", (channel_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+def delete_discovery_video(video_id: int) -> bool:
+    """
+    Removes a single discovery video and recalculates the competitor's total video count.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT discovery_channel_id FROM discovery_videos WHERE id = ?", (video_id,))
+        row = cursor.fetchone()
+        ch_id = row["discovery_channel_id"] if row else None
+
+        cursor.execute("DELETE FROM discovery_videos WHERE id = ?", (video_id,))
+        deleted = cursor.rowcount > 0
+
+        if ch_id:
+            cursor.execute("""
+            UPDATE discovery_channels
+            SET total_videos = (SELECT COUNT(*) FROM discovery_videos WHERE discovery_channel_id = ?)
+            WHERE id = ?
+            """, (ch_id, ch_id))
+
+        conn.commit()
+        return deleted
     finally:
         conn.close()
 

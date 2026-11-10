@@ -78,6 +78,9 @@ temp_*
 /*.html
 error_upload.png
 
+# --- Local Channel Profile Launchers ---
+open_chrome_*.bat
+
 # --- Keep Required Branding & Test Assets ---
 !branding/
 !branding/**

@@ -107,6 +107,7 @@ def verify_channel_session(channel_id: int) -> Dict[str, Any]:
     return {
         "success": True,
         "authenticated": is_auth,
+        "is_authenticated": is_auth,
         "channel_id": channel_id,
         "channel_name": ch["channel_name"],
         "detail": "Authenticated with YouTube / Google session" if is_auth else "No YouTube login tokens found in profile"
@@ -129,17 +130,35 @@ def launch_channel_login_window(channel_id: int) -> Dict[str, Any]:
     prof_dir = Path(ch["profile_dir"]).resolve()
     prof_dir.mkdir(parents=True, exist_ok=True)
 
+    # Ensure no lingering background chrome processes block the singleton broker
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-Command", "Stop-Process -Name chrome -Force -ErrorAction SilentlyContinue"], timeout=5)
+        time.sleep(0.5)
+    except Exception:
+        pass
+
+    # Clean up lockfile if stale
+    lock_file = prof_dir / "lockfile"
+    if lock_file.exists():
+        try:
+            lock_file.unlink()
+        except Exception:
+            pass
+
     step_log(f"Launching real Chrome for Channel '{ch['channel_name']}' with isolated profile: {prof_dir}", level="INFO")
 
+    login_url = "https://accounts.google.com/ServiceLogin?service=youtube&continue=https://studio.youtube.com"
     cmd = [
         chrome_exe,
         f"--user-data-dir={prof_dir}",
+        "--new-window",
+        "--start-maximized",
         "--no-first-run",
         "--no-default-browser-check",
-        "https://accounts.google.com/ServiceLogin?service=youtube&continue=https://studio.youtube.com"
+        login_url
     ]
 
-    # Non-blocking subprocess launch so the web dashboard continues running
+    # Non-blocking subprocess launch
     proc = subprocess.Popen(cmd)
 
     return {

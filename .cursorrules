@@ -1,0 +1,5 @@
+# Always read ARCHITECTURE.md and README.md before modifying any code.
+# Windows subprocess calls must use encoding="utf-8", errors="replace".
+# Never hardcode channel_id = 1; resolve active channel dynamically via db.py.
+# Never use native browser alert() or confirm() in templates/index.html; use showToast() and showConfirm().
+# Clean up Chromium lockfile/SingletonLock before launching Playwright persistent context.

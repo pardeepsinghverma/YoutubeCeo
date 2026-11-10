@@ -1,13 +1,14 @@
 import sys
 import os
 import json
+import time
 import base64
 import webbrowser
 import subprocess
 from pathlib import Path
 from typing import Optional
 from datetime import datetime, timedelta
-from fastapi import FastAPI, BackgroundTasks, HTTPException, UploadFile, File
+from fastapi import FastAPI, BackgroundTasks, HTTPException, UploadFile, File, Body
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from channel_settings import get_channel_settings, save_channel_settings, BRANDING_DIR
@@ -25,7 +26,7 @@ from ai_seo import generate_video_seo
 from scheduler import assign_schedule_slots, process_upload_queue
 from log_manager import get_logs
 
-app = FastAPI(title="YouTube AI Automation Dashboard")
+app = FastAPI(title="YoutubeCeo - Autonomous Multi-Channel Studio")
 
 app.add_middleware(
     CORSMiddleware,
@@ -74,6 +75,51 @@ def get_system_status(channel_id: Optional[int] = None):
 def get_videos(filter: Optional[str] = None, video_type: Optional[str] = None, parent_id: Optional[int] = None, channel_id: Optional[int] = None):
     videos = get_videos_by_status(status=filter if filter != "ALL" else None, video_type=video_type, parent_id=parent_id, channel_id=channel_id if channel_id != 0 else None)
     return videos
+
+@app.delete("/api/videos/{video_id}")
+def api_delete_video(video_id: int):
+    from db import delete_video
+    success = delete_video(video_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Video not found or already deleted")
+    return {"message": f"Video #{video_id} and associated parts deleted successfully"}
+
+@app.delete("/api/videos/parent/{parent_id}/parts")
+def api_delete_video_parts(parent_id: int):
+    from db import delete_video_parts
+    count = delete_video_parts(parent_id)
+    return {"message": f"Deleted {count} generated parts for parent video #{parent_id}", "deleted_count": count}
+
+@app.post("/api/videos/bulk-delete")
+def api_bulk_delete_videos(payload: dict = Body(...)):
+    video_ids = payload.get("video_ids")
+    if video_ids is None or not isinstance(video_ids, list):
+        raise HTTPException(status_code=400, detail="Missing or invalid 'video_ids' list in payload")
+    from db import bulk_delete_videos
+    try:
+        cleaned_ids = [int(v) for v in video_ids]
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="All items in 'video_ids' must be valid integers")
+    count = bulk_delete_videos(cleaned_ids)
+    return {"message": f"Successfully deleted {count} video(s)", "count": count}
+
+@app.post("/api/videos/bulk-status")
+def api_bulk_update_video_status(payload: dict = Body(...)):
+    video_ids = payload.get("video_ids")
+    if video_ids is None or not isinstance(video_ids, list):
+        raise HTTPException(status_code=400, detail="Missing or invalid 'video_ids' list in payload")
+    new_status = payload.get("status", "").strip().upper()
+    valid_statuses = {"SCANNED", "METADATA_READY", "SCHEDULED", "PUBLISHED", "FAILED"}
+    if new_status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid status '{new_status}'. Valid options: {sorted(valid_statuses)}")
+    from db import bulk_update_video_status
+    try:
+        cleaned_ids = [int(v) for v in video_ids]
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="All items in 'video_ids' must be valid integers")
+    count = bulk_update_video_status(cleaned_ids, new_status)
+    return {"message": f"Successfully updated {count} video(s) to {new_status}", "count": count}
+
 
 @app.get("/api/logs")
 def get_upload_logs():
@@ -377,11 +423,20 @@ def api_update_channel(channel_id: int, payload: dict):
     return {"message": "Channel updated successfully", "channel": updated}
 
 @app.delete("/api/channels/{channel_id}")
-def api_delete_channel(channel_id: int):
+def api_delete_channel(channel_id: int, delete_videos: bool = True):
     from db import delete_channel
     try:
-        delete_channel(channel_id)
-        return {"message": f"Channel #{channel_id} removed"}
+        delete_channel(channel_id, delete_videos=delete_videos)
+        return {"message": f"Channel #{channel_id} deleted successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/channels/{channel_id}/reset")
+def api_reset_channel(channel_id: int):
+    from db import reset_channel
+    try:
+        res = reset_channel(channel_id)
+        return res
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -395,11 +450,168 @@ def api_assign_videos_channel(payload: dict):
     count = assign_videos_to_channel(video_ids, int(channel_id))
     return {"message": f"Assigned {count} video(s) to Channel #{channel_id}"}
 
-def bg_scan_folder(folder_path: str):
+# --- Blueprint Module: Telegram HITL Orchestration Endpoints ---
+@app.get("/api/telegram/config")
+def api_get_telegram_config():
+    from db import get_telegram_config
+    return get_telegram_config()
+
+@app.post("/api/telegram/config")
+def api_save_telegram_config(payload: dict):
+    from db import save_telegram_config
+    token = payload.get("bot_token", "")
+    chat_id = payload.get("chat_id", "")
+    is_enabled = bool(payload.get("is_enabled", False))
+    notify_ready = bool(payload.get("notify_on_ready", True))
+    notify_upload = bool(payload.get("notify_on_upload", True))
+    auto_approve = bool(payload.get("auto_approve", False))
+    save_telegram_config(token, chat_id, is_enabled, notify_ready, notify_upload, auto_approve)
+    return {"message": "Telegram HITL settings saved successfully"}
+
+@app.post("/api/telegram/test")
+async def api_test_telegram():
+    from db import get_telegram_config
+    cfg = get_telegram_config()
+    token = cfg.get("bot_token")
+    chat_id = cfg.get("chat_id")
+    if not token or not chat_id:
+        raise HTTPException(status_code=400, detail="Missing Bot Token or Chat ID in Telegram Settings")
+    try:
+        from telegram import Bot
+        bot = Bot(token=token)
+        await bot.send_message(
+            chat_id=chat_id,
+            text="🤖 *Telegram HITL Connection Verified!*\n\nYour Autonomous YouTube Management System is successfully linked and listening for approvals.",
+            parse_mode="Markdown"
+        )
+        return {"status": "SUCCESS", "message": "Test message delivered to Telegram!"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Telegram Error: {str(e)}")
+
+@app.post("/api/telegram/send-review/{video_id}")
+async def api_send_telegram_review(video_id: int):
+    from telegram_bot import send_video_review_card
+    success = await send_video_review_card(video_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Could not send review card. Verify Telegram Bot token & Chat ID in settings.")
+    return {"message": f"Review card dispatched to Telegram for Video #{video_id}"}
+
+# --- Blueprint Module: Competitor Discovery & Ingestion Endpoints ---
+@app.get("/api/discovery/channels")
+def api_get_discovery_channels(channel_id: Optional[int] = None):
+    from db import get_discovery_channels
+    return get_discovery_channels(channel_id=channel_id if channel_id != 0 else None)
+
+@app.get("/api/discovery/videos")
+def api_get_discovery_videos(limit: int = 50, is_short: Optional[bool] = None, channel_id: Optional[int] = None, parent_channel_id: Optional[int] = None):
+    from db import get_top_discovery_videos
+    return get_top_discovery_videos(
+        limit=limit, 
+        is_short=is_short, 
+        channel_id=channel_id if channel_id != 0 else None,
+        parent_channel_id=parent_channel_id if parent_channel_id != 0 else None
+    )
+
+@app.delete("/api/discovery/channels/{channel_id}")
+def api_delete_discovery_channel(channel_id: int):
+    from db import delete_discovery_channel
+    delete_discovery_channel(channel_id)
+    return {"message": f"Competitor channel #{channel_id} and scraped videos removed"}
+
+@app.delete("/api/discovery/videos/{video_id}")
+def api_delete_discovery_video(video_id: int):
+    from db import delete_discovery_video
+    success = delete_discovery_video(video_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Discovery video not found")
+    return {"message": f"Discovery video #{video_id} removed"}
+
+def bg_scan_competitor(channel_url: str, max_items: int = 40, channel_id: Optional[int] = None):
+    global WORKER_STATE
+    WORKER_STATE["is_busy"] = True
+    WORKER_STATE["current_task"] = f"Scanning competitor channel {channel_url}..."
+    try:
+        from discovery_engine import extract_channel_metadata
+        res = extract_channel_metadata(channel_url, max_items=max_items, channel_id=channel_id)
+        WORKER_STATE["last_message"] = f"Competitor radar: Scraped {res.get('scraped_count', 0)} videos from '{res.get('channel_name')}'!"
+    except Exception as e:
+        WORKER_STATE["last_message"] = f"Competitor scan note: {e}"
+    finally:
+        WORKER_STATE["is_busy"] = False
+        WORKER_STATE["current_task"] = "Idle"
+
+@app.post("/api/discovery/scan")
+def api_scan_competitor(payload: dict, background_tasks: BackgroundTasks):
+    channel_url = payload.get("channel_url", "").strip()
+    max_items = int(payload.get("max_items", 40))
+    channel_id = payload.get("channel_id")
+    if channel_id is not None:
+        try:
+            channel_id = int(channel_id)
+        except Exception:
+            channel_id = None
+    if not channel_url:
+        raise HTTPException(status_code=400, detail="Missing channel_url")
+    background_tasks.add_task(bg_scan_competitor, channel_url, max_items, channel_id)
+    return {"message": f"Competitor discovery scan started for {channel_url}"}
+
+# --- Blueprint Module: Master Autopilot Pipeline Endpoint ---
+def bg_master_autopilot(payload: dict):
+    global WORKER_STATE
+    WORKER_STATE["is_busy"] = True
+    scope = payload.get("channel_id")
+    raw_folder = payload.get("raw_folder_path")
+    max_vids = int(payload.get("max_videos", 2))
+    slice_p = bool(payload.get("slice_parts", True))
+    parts_num = int(payload.get("parts_per_video", 3))
+    auto_up = bool(payload.get("auto_upload", True))
+    is_headless = bool(payload.get("headless", True))
+
+    def on_prog(msg, pct):
+        WORKER_STATE["current_task"] = msg
+        WORKER_STATE["progress"] = pct
+        WORKER_STATE["last_message"] = msg
+
+    try:
+        from master_autopilot import MasterAutopilot
+        ap = MasterAutopilot(progress_callback=on_prog)
+        if str(scope).upper() == "ALL" or scope == 0 or not scope:
+            ap.run_all_channels_pipeline(max_per_channel=max_vids, auto_upload=auto_up)
+        else:
+            ap.run_channel_pipeline(
+                channel_id=int(scope),
+                raw_folder_path=raw_folder,
+                max_videos_to_process=max_vids,
+                slice_parts=slice_p,
+                parts_per_video=parts_num,
+                auto_upload=auto_up,
+                headless=is_headless
+            )
+        WORKER_STATE["last_message"] = "Master Autopilot pipeline completed successfully!"
+    except Exception as e:
+        WORKER_STATE["last_message"] = f"Master Autopilot note: {e}"
+        print(f"[!] Master Autopilot error: {e}", flush=True)
+    finally:
+        WORKER_STATE["is_busy"] = False
+        WORKER_STATE["current_task"] = "Idle"
+        WORKER_STATE["progress"] = 0
+
+@app.post("/api/master/run")
+def api_master_run(payload: dict, background_tasks: BackgroundTasks):
+    background_tasks.add_task(bg_master_autopilot, payload)
+    return {"message": "Master Autopilot pipeline launched in background"}
+
+def bg_scan_folder(folder_path: str, channel_id: Optional[int] = None):
     global WORKER_STATE
     WORKER_STATE["is_busy"] = True
     WORKER_STATE["current_task"] = f"Scanning {folder_path}..."
     try:
+        from db import update_channel_source_folder, get_active_channel
+        if not channel_id:
+            act = get_active_channel()
+            channel_id = act["id"] if act else 1
+        update_channel_source_folder(channel_id, folder_path)
+
         folder = Path(folder_path).resolve()
         supported = {".mp4", ".mov", ".mkv", ".avi", ".webm"}
         files = [f for f in folder.rglob("*") if f.suffix.lower() in supported]
@@ -413,7 +625,8 @@ def bg_scan_folder(folder_path: str):
                     duration_seconds=info["duration_seconds"],
                     width=info["width"],
                     height=info["height"],
-                    is_short=info["is_short"]
+                    is_short=info["is_short"],
+                    channel_id=channel_id
                 )
             except Exception as e:
                 print(f"Error inspecting {f.name}: {e}")
@@ -427,10 +640,26 @@ def bg_scan_folder(folder_path: str):
 @app.post("/api/scan")
 def api_scan(payload: dict, background_tasks: BackgroundTasks):
     folder = payload.get("folder", "").strip()
+    channel_id = payload.get("channel_id")
+    if channel_id is not None:
+        try:
+            channel_id = int(channel_id)
+        except Exception:
+            channel_id = None
     if not folder or not Path(folder).exists():
         raise HTTPException(status_code=400, detail="Invalid folder path")
-    background_tasks.add_task(bg_scan_folder, folder)
+    if channel_id:
+        from db import update_channel_source_folder
+        update_channel_source_folder(channel_id, folder)
+    background_tasks.add_task(bg_scan_folder, folder, channel_id)
     return {"message": "Folder scan started in background"}
+
+@app.post("/api/channels/{channel_id}/source-folder")
+def api_set_channel_source_folder(channel_id: int, payload: dict):
+    from db import update_channel_source_folder
+    folder = payload.get("folder", "").strip()
+    update_channel_source_folder(channel_id, folder)
+    return {"message": "Channel source folder updated", "channel_id": channel_id, "folder": folder}
 
 def bg_generate_seo(limit: int = 10):
     global WORKER_STATE
@@ -577,6 +806,16 @@ def api_update_video_schedule(payload: dict):
     update_video_schedule(int(vid_id), dt_str)
     return {"message": f"Updated schedule for video #{vid_id} to {dt_str}"}
 
+@app.post("/api/videos/{video_id}/status")
+def api_update_video_status(video_id: int, payload: dict):
+    new_status = payload.get("status", "").strip().upper()
+    valid_statuses = {"SCANNED", "METADATA_READY", "SCHEDULED", "PUBLISHED", "FAILED"}
+    if new_status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid status '{new_status}'. Valid options: {sorted(valid_statuses)}")
+    from db import update_video_status
+    update_video_status(video_id, new_status)
+    return {"message": f"Video #{video_id} status updated to {new_status}", "video_id": video_id, "status": new_status}
+
 def bg_upload_single(video_id: int, headless: bool = False, channel_id: int = None):
     global WORKER_STATE
     WORKER_STATE["is_busy"] = True
@@ -655,6 +894,52 @@ def api_upload_single_video(payload: dict, background_tasks: BackgroundTasks):
     background_tasks.add_task(bg_upload_single, int(vid_id), headless, final_channel_id)
     return {"message": f"Upload started for video #{vid_id} on {channel_name}", "channel_name": channel_name, "channel_id": final_channel_id}
 
+@app.post("/api/videos/{video_id}/retry")
+def api_retry_video(
+    video_id: int, 
+    background_tasks: BackgroundTasks, 
+    payload: Optional[dict] = Body(default=None), 
+    trigger_upload: Optional[bool] = None
+):
+    from db import retry_video_upload, get_connection
+    conn = get_connection()
+    try:
+        row = conn.cursor().execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Video #{video_id} not found")
+
+    retry_video_upload(video_id)
+
+    should_upload = False
+    if trigger_upload is not None:
+        should_upload = bool(trigger_upload)
+    elif payload and isinstance(payload, dict):
+        should_upload = bool(payload.get("trigger_upload") or payload.get("upload") or payload.get("auto_upload") or payload.get("start_upload"))
+
+    if should_upload:
+        headless = payload.get("headless", False) if payload else False
+        req_ch_id = payload.get("channel_id") if payload else None
+        row_dict = dict(row)
+        target_ch_id = req_ch_id or row_dict.get("channel_id") or 1
+        background_tasks.add_task(bg_upload_single, int(video_id), headless, target_ch_id)
+        return {
+            "message": f"Video #{video_id} reset to METADATA_READY and background upload triggered",
+            "video_id": video_id,
+            "status": "METADATA_READY",
+            "upload_started": True
+        }
+
+    return {
+        "message": f"Video #{video_id} reset to METADATA_READY",
+        "video_id": video_id,
+        "status": "METADATA_READY",
+        "upload_started": False
+    }
+
+
 def bg_upload_next(limit: int = 1, headless: bool = False, channel_id: int = None):
     global WORKER_STATE
     WORKER_STATE["is_busy"] = True
@@ -706,6 +991,176 @@ def api_upload_next(payload: dict, background_tasks: BackgroundTasks):
 
     background_tasks.add_task(bg_upload_next, limit, headless, final_channel_id)
     return {"message": f"Batch upload started for next {limit} video(s) on {channel_name}", "channel_name": channel_name}
+
+# --- Module: Autonomous Auto-Upload Pipeline ---
+AUTO_UPLOAD_STOP = False
+CURRENT_WORKER_PROC = None
+
+def bg_auto_upload(
+    channel_id: Optional[int] = None,
+    parent_id: Optional[int] = None,
+    headless: bool = False,
+    status_filter: Optional[list] = None,
+    video_type: Optional[str] = "PARTS"
+):
+    global WORKER_STATE, AUTO_UPLOAD_STOP
+    AUTO_UPLOAD_STOP = False
+    WORKER_STATE["is_busy"] = True
+
+    from db import get_channel_by_id, get_active_channel, get_connection
+    target_ch = get_channel_by_id(channel_id) if channel_id else get_active_channel()
+    final_channel_id = target_ch["id"] if target_ch else 1
+    channel_name = target_ch["channel_name"] if target_ch else "Default Channel"
+
+    statuses = status_filter or ["METADATA_READY"]
+
+    conn = get_connection()
+    try:
+        c = conn.cursor()
+        status_placeholders = ",".join("?" for _ in statuses)
+        where = f"(channel_id = ? OR channel_id IS NULL) AND status IN ({status_placeholders}) AND (youtube_url IS NULL OR youtube_url = '')"
+        params = [final_channel_id] + list(statuses)
+
+        if parent_id is not None:
+            if str(parent_id).lower() == "standalone":
+                where += " AND parent_video_id IS NULL"
+            else:
+                where += " AND parent_video_id = ?"
+                params.append(int(parent_id))
+        elif video_type == "PARTS":
+            where += " AND (part_number IS NOT NULL OR is_short = 1)"
+
+        query = f"SELECT id, file_name, title, part_number, scheduled_datetime, status FROM videos WHERE {where} ORDER BY part_number ASC, scheduled_datetime ASC, id ASC"
+        c.execute(query, params)
+        queue = [dict(r) for r in c.fetchall()]
+    finally:
+        conn.close()
+
+    total_count = len(queue)
+    if total_count == 0:
+        WORKER_STATE["is_busy"] = False
+        WORKER_STATE["current_task"] = "Idle"
+        WORKER_STATE["last_message"] = f"No videos found ready to upload for '{channel_name}'."
+        return
+
+    from log_manager import step_log
+    scope_desc = f"Main Video #{parent_id}" if parent_id else f"Channel '{channel_name}'"
+    step_log(f"Auto Upload initiated for {total_count} video(s) on {scope_desc} (#{final_channel_id}, headless={headless})", level="INFO")
+
+    success_count = 0
+    failed_count = 0
+
+    for idx, item in enumerate(queue):
+        if AUTO_UPLOAD_STOP:
+            step_log(f"Auto Upload stopped by user after {idx}/{total_count} videos.", level="WARN")
+            WORKER_STATE["last_message"] = f"Auto Upload stopped by user. ({success_count} uploaded, {total_count - idx} remaining)"
+            break
+
+        vid_id = item["id"]
+        safe_title = item.get("title") or item.get("file_name") or f"Video #{vid_id}"
+        progress_pct = int((idx / total_count) * 100)
+
+        WORKER_STATE["current_task"] = f"Auto Uploading #{vid_id} ({idx + 1}/{total_count}): {safe_title[:32]}..."
+        WORKER_STATE["progress"] = progress_pct
+        WORKER_STATE["last_message"] = f"Auto Upload [{idx + 1}/{total_count}]: Uploading #{vid_id} to '{channel_name}'..."
+
+        cmd = [sys.executable, str(BASE_DIR / "scheduler.py"), "upload", str(vid_id), "--channel", str(final_channel_id)]
+        if headless:
+            cmd.append("--headless")
+
+        sub_env = os.environ.copy()
+        sub_env["PYTHONIOENCODING"] = "utf-8"
+        sub_env["PYTHONUTF8"] = "1"
+
+        try:
+            CURRENT_WORKER_PROC = subprocess.Popen(cmd, cwd=str(BASE_DIR), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", env=sub_env)
+            stdout, stderr = CURRENT_WORKER_PROC.communicate()
+            returncode = CURRENT_WORKER_PROC.returncode
+            CURRENT_WORKER_PROC = None
+
+            if AUTO_UPLOAD_STOP:
+                step_log(f"Auto Upload stopped by user.", level="WARN")
+                WORKER_STATE["last_message"] = f"Auto Upload stopped by user. ({success_count} uploaded)"
+                break
+
+            if returncode == 0:
+                success_count += 1
+                WORKER_STATE["last_message"] = f"Auto Upload [{idx + 1}/{total_count}]: Video #{vid_id} uploaded & scheduled! Next in 4s..."
+                for _ in range(40):
+                    if AUTO_UPLOAD_STOP:
+                        break
+                    time.sleep(0.1)
+            else:
+                failed_count += 1
+                err_text = (stderr or stdout or "").strip()
+                WORKER_STATE["last_message"] = f"Auto Upload error on #{vid_id}: {err_text[:75]}"
+                step_log(f"Auto Upload item #{vid_id} failed: {err_text}", level="ERROR", video_id=vid_id)
+                for _ in range(30):
+                    if AUTO_UPLOAD_STOP:
+                        break
+                    time.sleep(0.1)
+        except Exception as up_err:
+            CURRENT_WORKER_PROC = None
+            failed_count += 1
+            step_log(f"Auto Upload subprocess exception on #{vid_id}: {up_err}", level="ERROR", video_id=vid_id)
+            for _ in range(30):
+                if AUTO_UPLOAD_STOP:
+                    break
+                time.sleep(0.1)
+
+    WORKER_STATE["is_busy"] = False
+    WORKER_STATE["current_task"] = "Idle"
+    WORKER_STATE["progress"] = 100
+    if not AUTO_UPLOAD_STOP:
+        WORKER_STATE["last_message"] = f"🎉 Auto Upload finished! Uploaded: {success_count}/{total_count} (Failed: {failed_count})"
+        step_log(f"Auto Upload batch complete on '{channel_name}': {success_count} succeeded, {failed_count} failed.", level="SUCCESS")
+
+@app.post("/api/auto-upload")
+def api_auto_upload(payload: dict, background_tasks: BackgroundTasks):
+    channel_id = payload.get("channel_id")
+    parent_id = payload.get("parent_id")
+    headless = payload.get("headless", False)
+    status_filter = payload.get("status_filter")
+    video_type = payload.get("video_type", "PARTS")
+
+    from db import get_channel_by_id, get_active_channel
+    target_ch = get_channel_by_id(channel_id) if channel_id else get_active_channel()
+    cid = target_ch["id"] if target_ch else 1
+    cname = target_ch["channel_name"] if target_ch else "Default Channel"
+
+    background_tasks.add_task(bg_auto_upload, cid, parent_id, headless, status_filter, video_type)
+    return {
+        "message": f"Auto Upload started for '{cname}'!",
+        "channel_id": cid,
+        "channel_name": cname
+    }
+
+@app.post("/api/worker/stop")
+@app.post("/api/auto-upload/stop")
+def api_worker_stop():
+    global AUTO_UPLOAD_STOP, CURRENT_WORKER_PROC, WORKER_STATE
+    AUTO_UPLOAD_STOP = True
+    if CURRENT_WORKER_PROC and CURRENT_WORKER_PROC.poll() is None:
+        try:
+            CURRENT_WORKER_PROC.terminate()
+            time.sleep(0.5)
+            if CURRENT_WORKER_PROC.poll() is None:
+                CURRENT_WORKER_PROC.kill()
+        except Exception:
+            pass
+        CURRENT_WORKER_PROC = None
+
+    # Kill any orphaned Chrome automation browser instances
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-Command", "Stop-Process -Name chrome -Force -ErrorAction SilentlyContinue"], timeout=3)
+    except Exception:
+        pass
+
+    WORKER_STATE["is_busy"] = False
+    WORKER_STATE["current_task"] = "Idle"
+    WORKER_STATE["last_message"] = "Background worker stopped by user."
+    WORKER_STATE["progress"] = 0
+    return {"message": "Background worker stopped successfully."}
 
 def bg_create_shorts(video_id: int, num_parts: int = 0, add_parts_label: bool = True):
     global WORKER_STATE
@@ -932,6 +1387,17 @@ DASHBOARD_HTML = """
 
       <!-- Controls & Health Badges -->
       <div class="flex items-center gap-3 text-xs flex-wrap">
+        <!-- Master Autopilot Launch Button -->
+        <button onclick="openMasterAutopilotModal()" class="px-3.5 py-1.5 rounded-full bg-gradient-to-r from-amber-500 via-orange-500 to-red-600 hover:from-amber-400 hover:to-red-500 text-white font-bold text-xs shadow-lg shadow-orange-600/30 transition flex items-center gap-1.5 cursor-pointer" title="Execute full autonomous pipeline (Ingest, SEO, Slice, Thumbnails, Schedule, Upload)">
+          <i class="fa-solid fa-bolt-lightning text-amber-200"></i>
+          <span>⚡ Run Autopilot</span>
+        </button>
+
+        <div id="badge-gpu" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full card border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 text-[11px]" title="NVIDIA NVENC hardware video acceleration active">
+          <i class="fa-solid fa-microchip text-emerald-400"></i>
+          <span>NVENC GPU</span>
+        </div>
+
         <!-- Master "Add Parts Label:" Toggle -->
         <div class="flex items-center gap-2 px-3 py-1.5 rounded-full card border border-slate-700/80 bg-slate-900/90 shadow-sm" title="Controls whether Part numbers like 'Part: 1' are embedded on video and added to title">
           <i class="fa-solid fa-tag text-amber-400"></i>
@@ -1033,7 +1499,10 @@ DASHBOARD_HTML = """
       <div class="flex flex-col lg:flex-row items-center justify-between gap-4">
         <!-- Scan Input -->
         <div class="flex items-center gap-2 w-full lg:w-1/2">
-          <input type="text" id="scan-folder-input" placeholder="Paste full path to your 500 videos folder..." 
+          <input type="text" id="scan-folder-input" 
+                 onchange="saveChannelSourceFolder()" 
+                 onblur="saveChannelSourceFolder()"
+                 placeholder="Paste full path to raw videos folder for this channel..." 
                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-500">
           <button onclick="scanFolder()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium whitespace-nowrap transition">
             <i class="fa-solid fa-folder-open mr-1"></i> Scan Folder
@@ -1062,24 +1531,30 @@ DASHBOARD_HTML = """
     </div>
 
     <!-- Tabs Navigation -->
-    <div class="flex items-center gap-4 border-b border-slate-800 pb-2 text-sm font-medium overflow-x-auto">
-      <button onclick="switchTab('videos')" id="tab-btn-videos" class="text-white border-b-2 border-red-500 pb-2 transition flex items-center gap-1.5 whitespace-nowrap">
+    <div class="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-slate-800 pb-2 text-sm font-medium">
+      <button onclick="switchTab('videos')" id="tab-btn-videos" class="text-white border-b-2 border-red-500 pb-2 transition flex items-center gap-1.5 whitespace-nowrap font-semibold">
         <i class="fa-solid fa-list-check"></i> Video Queue
       </button>
-      <button onclick="switchTab('parts')" id="tab-btn-parts" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap">
+      <button onclick="switchTab('parts')" id="tab-btn-parts" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent">
         <i class="fa-solid fa-bolt text-amber-400"></i> Generated Parts (<span id="parts-badge-count">0</span>)
       </button>
-      <button onclick="switchTab('channels')" id="tab-btn-channels" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap">
+      <button onclick="switchTab('discovery')" id="tab-btn-discovery" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent">
+        <i class="fa-solid fa-satellite-dish text-rose-400"></i> Competitor Radar
+      </button>
+      <button onclick="switchTab('branding')" id="tab-btn-branding" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent">
+        <i class="fa-solid fa-palette text-pink-400"></i> Channel & Branding
+      </button>
+      <button onclick="switchTab('channels')" id="tab-btn-channels" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent">
         <i class="fa-solid fa-users-gear text-indigo-400"></i> Channels & Accounts (<span id="channels-badge-count">1</span>)
       </button>
-      <button onclick="switchTab('logs')" id="tab-btn-logs" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap">
+      <button onclick="switchTab('telegram')" id="tab-btn-telegram" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent">
+        <i class="fa-brands fa-telegram text-sky-400"></i> Telegram HITL
+      </button>
+      <button onclick="switchTab('logs')" id="tab-btn-logs" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent">
         <i class="fa-solid fa-clock-rotate-left"></i> Upload Logs History
       </button>
-      <button onclick="switchTab('commands')" id="tab-btn-commands" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap">
-        <i class="fa-solid fa-terminal text-emerald-400"></i> Command Panel & Runner
-      </button>
-      <button onclick="switchTab('branding')" id="tab-btn-branding" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap">
-        <i class="fa-solid fa-palette text-pink-400"></i> Channel & Branding
+      <button onclick="switchTab('commands')" id="tab-btn-commands" class="text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent">
+        <i class="fa-solid fa-terminal text-emerald-400"></i> Command Panel
       </button>
     </div>
 
@@ -1853,6 +2328,244 @@ DASHBOARD_HTML = """
         </div>
       </div>
     </div>
+
+    <!-- Tab 7: Telegram Human-in-the-Loop (HITL) Bot Panel -->
+    <div id="tab-telegram" class="card p-6 space-y-6 hidden">
+      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl bg-sky-600/20 text-sky-400 flex items-center justify-center text-lg shadow">
+            <i class="fa-brands fa-telegram"></i>
+          </div>
+          <div>
+            <h2 class="text-lg font-bold text-white tracking-tight">Telegram Mobile HITL (Human-in-the-Loop)</h2>
+            <p class="text-xs text-slate-400">Review 3D AI thumbnails, verify titles, and approve YouTube uploads on your phone via Telegram Bot.</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="testTelegramConnection()" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-sky-300 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 border border-sky-800/40">
+            <i class="fa-solid fa-paper-plane text-[10px]"></i> Send Test Ping
+          </button>
+          <button onclick="saveTelegramSettings()" class="px-4 py-2 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white rounded-lg text-xs font-bold shadow-lg shadow-sky-600/25 transition flex items-center gap-1.5">
+            <i class="fa-solid fa-floppy-disk text-[11px]"></i> Save Telegram Config
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- Settings Column (7 cols) -->
+        <div class="lg:col-span-7 space-y-4">
+          <div class="card p-5 space-y-4 border-slate-700/80 bg-slate-900/70">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+              <span class="text-xs font-bold text-white uppercase tracking-wider">Bot Credentials</span>
+              <span id="tg-status-pill" class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400">Checking...</span>
+            </div>
+
+            <div class="space-y-1.5">
+              <label class="block text-xs font-semibold text-slate-300">Telegram Bot Token (from @BotFather) *</label>
+              <input type="password" id="tg-bot-token" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ..." class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500 font-mono">
+              <p class="text-[10px] text-slate-500">Create a bot on Telegram with <code class="text-slate-400">@BotFather</code> and paste the API token here.</p>
+            </div>
+
+            <div class="space-y-1.5">
+              <label class="block text-xs font-semibold text-slate-300">Target Chat ID (Your User ID or Group ID) *</label>
+              <input type="text" id="tg-chat-id" placeholder="e.g. 987654321 or -100123456789" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500 font-mono">
+              <p class="text-[10px] text-slate-500">Message <code class="text-slate-400">@userinfobot</code> on Telegram to find your numerical Chat ID.</p>
+            </div>
+
+            <div class="p-3.5 rounded-xl bg-sky-950/20 border border-sky-900/40 flex items-center justify-between">
+              <div>
+                <div class="font-semibold text-xs text-sky-200">Enable Mobile HITL Bot</div>
+                <div class="text-[10px] text-slate-400">Send mobile review cards for newly rendered Shorts & videos</div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="tg-enabled" class="sr-only peer">
+                <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-sky-600"></div>
+              </label>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+              <label class="flex items-center gap-2 p-2.5 rounded-lg bg-slate-950/60 border border-slate-800 text-xs text-slate-300 cursor-pointer">
+                <input type="checkbox" id="tg-notify-ready" checked class="rounded border-slate-700 text-sky-500 focus:ring-0">
+                <span>Card when Short is Ready</span>
+              </label>
+              <label class="flex items-center gap-2 p-2.5 rounded-lg bg-slate-950/60 border border-slate-800 text-xs text-slate-300 cursor-pointer">
+                <input type="checkbox" id="tg-notify-upload" checked class="rounded border-slate-700 text-sky-500 focus:ring-0">
+                <span>Alert on YouTube Live</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Instructions Column (5 cols) -->
+        <div class="lg:col-span-5 space-y-4">
+          <div class="p-5 rounded-2xl bg-gradient-to-br from-sky-950/40 to-slate-900/90 border border-sky-900/40 space-y-3">
+            <div class="text-xs font-bold text-sky-400 flex items-center gap-1.5 uppercase tracking-wider">
+              <i class="fa-solid fa-mobile-screen-button"></i> Mobile Approval Workflow
+            </div>
+            <ol class="text-xs text-slate-300 space-y-2 list-decimal list-inside leading-relaxed">
+              <li>When a video or Short is sliced, a photo card is pushed to your phone with the rendered 3D thumbnail.</li>
+              <li>You tap <strong class="text-emerald-400">[🚀 Publish Now]</strong> to upload immediately as Public.</li>
+              <li>Or tap <strong class="text-blue-400">[🗓️ Schedule Slot]</strong> to queue it into your automated slot schedule.</li>
+              <li>Tap <strong class="text-purple-400">[🎨 New Thumbnail]</strong> to tell the AI to regenerate the 3D visual.</li>
+            </ol>
+            <div class="pt-2 border-t border-sky-900/40 text-[11px] text-slate-400">
+              💡 <em>Runs asynchronously with sub-second callbacks (&lt;64 bytes) to prevent battery drain or client spinners.</em>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 8: Competitor Discovery & Viral Trend Radar Panel -->
+    <div id="tab-discovery" class="card p-6 space-y-6 hidden">
+      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl bg-rose-600/20 text-rose-400 flex items-center justify-center text-lg shadow">
+            <i class="fa-solid fa-satellite-dish"></i>
+          </div>
+          <div>
+            <h2 class="text-lg font-bold text-white tracking-tight">Competitor Discovery & Viral Trend Radar</h2>
+            <p class="text-xs text-slate-400">Extract competitor channel analytics with zero video downloads and discover viral topics ranked by View Velocity.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Scan Bar -->
+      <div class="card p-4 bg-slate-900/80 border-slate-700/80 flex flex-col md:flex-row items-center gap-3">
+        <div class="relative flex-1 w-full">
+          <i class="fa-brands fa-youtube absolute left-3.5 top-3 text-red-500 text-sm"></i>
+          <input type="text" id="discovery-channel-url" placeholder="Paste competitor channel URL (e.g. https://www.youtube.com/@competitor)..." class="w-full bg-slate-950 border border-slate-700 rounded-lg pl-10 pr-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500">
+        </div>
+        <div class="flex items-center gap-2 w-full md:w-auto">
+          <select id="discovery-max-items" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white">
+            <option value="25">Scan 25 Videos</option>
+            <option value="50" selected>Scan 50 Videos</option>
+            <option value="100">Scan 100 Videos</option>
+          </select>
+          <button onclick="startCompetitorScan()" id="btn-scan-competitor" class="px-5 py-2 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white rounded-lg text-xs font-bold transition shadow-lg shadow-rose-600/25 flex items-center gap-1.5 whitespace-nowrap">
+            <i class="fa-solid fa-magnifying-glass text-[11px]"></i> Scan Radar
+          </button>
+        </div>
+      </div>
+
+      <!-- Tracked Channels Pills -->
+      <div class="space-y-1.5">
+        <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+          <i class="fa-solid fa-layer-group text-[10px]"></i> Tracked Competitor Channels
+        </div>
+        <div id="tracked-channels-pills" class="flex items-center gap-2 flex-wrap">
+          <span class="text-xs text-slate-500">Loading tracked channels...</span>
+        </div>
+      </div>
+
+      <!-- Trending Videos Table -->
+      <div class="card overflow-hidden border-slate-800">
+        <div class="p-3 border-b border-slate-800 flex items-center justify-between">
+          <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">Top Breakout Topics (Ranked by View Velocity)</span>
+          <div class="flex items-center gap-2">
+            <button onclick="loadDiscoveryVideos('ALL')" class="text-[11px] px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">All</button>
+            <button onclick="loadDiscoveryVideos('SHORTS')" class="text-[11px] px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">⚡ Shorts Only</button>
+            <button onclick="loadDiscoveryVideos('LONG')" class="text-[11px] px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">🎬 Long Form</button>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-900/80 text-slate-400 font-semibold uppercase text-[10px] border-b border-slate-800">
+              <tr>
+                <th class="p-3">Thumbnail</th>
+                <th class="p-3">Video Title & Competitor</th>
+                <th class="p-3 text-center">Type</th>
+                <th class="p-3 text-right">🔥 View Velocity</th>
+                <th class="p-3 text-right">Total Views</th>
+                <th class="p-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="discovery-videos-tbody" class="divide-y divide-slate-800/60 font-medium">
+              <tr><td colspan="6" class="p-6 text-center text-slate-500">No competitor channels scanned yet. Enter a channel URL above to discover breakout trends!</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  <!-- Modal: Run Master Autopilot -->
+  <div id="modal-master-autopilot" class="fixed inset-0 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4 z-50">
+    <div class="card max-w-lg w-full p-6 space-y-5 border-amber-500/50 shadow-2xl bg-slate-900">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-500 to-red-600 text-white flex items-center justify-center text-lg shadow-lg shadow-orange-600/30">
+            <i class="fa-solid fa-bolt-lightning"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Master Autopilot Orchestrator</h3>
+            <p class="text-xs text-slate-400">Execute full end-to-end autonomous publishing in one click</p>
+          </div>
+        </div>
+        <button onclick="closeMasterAutopilotModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      </div>
+
+      <div class="space-y-4 text-xs">
+        <!-- Target Scope -->
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">Target Channel Scope *</label>
+          <select id="master-target-scope" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-amber-500">
+            <!-- Dynamically populated with Active Channel first, or All Channels -->
+          </select>
+        </div>
+
+        <!-- Optional Ingest Folder -->
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">Raw Media Folder (Optional)</label>
+          <input type="text" id="master-folder-path" placeholder="Paste path to scan new raw videos (or leave empty to use current queue)..." class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-amber-500">
+        </div>
+
+        <!-- Volume & Slicing -->
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">Videos to Process</label>
+            <input type="number" id="master-max-videos" value="2" min="1" max="20" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-amber-500">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">Parts per Long Video</label>
+            <input type="number" id="master-parts-per-video" value="3" min="1" max="10" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-amber-500">
+          </div>
+        </div>
+
+        <!-- Pipeline Steps Checklist -->
+        <div class="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
+          <div class="text-[11px] font-bold text-amber-400 uppercase tracking-wider">Automated Pipeline Actions</div>
+          <div class="grid grid-cols-2 gap-2 text-slate-300">
+            <label class="flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" id="master-step-seo" checked class="rounded border-slate-700 text-amber-500 focus:ring-0">
+              <span>Gemini Multimodal SEO</span>
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" id="master-step-slice" checked class="rounded border-slate-700 text-amber-500 focus:ring-0">
+              <span>Slice Shorts (NVENC)</span>
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" id="master-step-thumb" checked class="rounded border-slate-700 text-amber-500 focus:ring-0">
+              <span>3D AI Thumbnails</span>
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" id="master-step-upload" checked class="rounded border-slate-700 text-amber-500 focus:ring-0">
+              <span>Upload to YouTube</span>
+            </label>
+          </div>
+          <div class="text-[10px] text-slate-400 pt-1 border-t border-slate-800">
+            ⚡ Content ID evasion (atempo=1.035 + perceptual grading) is automatically applied during render.
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+        <button type="button" onclick="closeMasterAutopilotModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium">Cancel</button>
+        <button type="button" onclick="submitMasterAutopilot()" id="btn-submit-autopilot" class="px-5 py-2 bg-gradient-to-r from-amber-500 via-orange-500 to-red-600 hover:from-amber-400 hover:to-red-500 text-white rounded-lg text-xs font-bold shadow-lg shadow-orange-600/30 flex items-center gap-1.5">
+          <i class="fa-solid fa-play text-[10px]"></i> Launch Autopilot
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- Modal: Connect New YouTube Channel -->
   <div id="modal-create-channel" class="fixed inset-0 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4 z-50">
@@ -2632,6 +3345,10 @@ DASHBOARD_HTML = """
       document.getElementById('tab-logs').classList.toggle('hidden', tab !== 'logs');
       document.getElementById('tab-commands').classList.toggle('hidden', tab !== 'commands');
       document.getElementById('tab-branding').classList.toggle('hidden', tab !== 'branding');
+      const tgTab = document.getElementById('tab-telegram');
+      if (tgTab) tgTab.classList.toggle('hidden', tab !== 'telegram');
+      const discTab = document.getElementById('tab-discovery');
+      if (discTab) discTab.classList.toggle('hidden', tab !== 'discovery');
       
       const vBtn = document.getElementById('tab-btn-videos');
       const pBtn = document.getElementById('tab-btn-parts');
@@ -2639,9 +3356,11 @@ DASHBOARD_HTML = """
       const lBtn = document.getElementById('tab-btn-logs');
       const cBtn = document.getElementById('tab-btn-commands');
       const bBtn = document.getElementById('tab-btn-branding');
+      const tgBtn = document.getElementById('tab-btn-telegram');
+      const discBtn = document.getElementById('tab-btn-discovery');
 
-      const activeClass = "text-white border-b-2 border-red-500 pb-2 transition flex items-center gap-1.5 whitespace-nowrap";
-      const inactiveClass = "text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap";
+      const activeClass = "text-white border-b-2 border-red-500 pb-2 transition flex items-center gap-1.5 whitespace-nowrap font-semibold";
+      const inactiveClass = "text-slate-400 hover:text-white pb-2 transition flex items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent";
 
       if (vBtn) vBtn.className = tab === 'videos' ? activeClass : inactiveClass;
       if (pBtn) pBtn.className = tab === 'parts' ? activeClass : inactiveClass;
@@ -2649,6 +3368,8 @@ DASHBOARD_HTML = """
       if (lBtn) lBtn.className = tab === 'logs' ? activeClass : inactiveClass;
       if (cBtn) cBtn.className = tab === 'commands' ? activeClass : inactiveClass;
       if (bBtn) bBtn.className = tab === 'branding' ? activeClass : inactiveClass;
+      if (tgBtn) tgBtn.className = tab === 'telegram' ? activeClass : inactiveClass;
+      if (discBtn) discBtn.className = tab === 'discovery' ? activeClass : inactiveClass;
 
       if (tab === 'videos') loadVideos();
       if (tab === 'parts') loadParts();
@@ -2660,6 +3381,227 @@ DASHBOARD_HTML = """
       }
       if (tab === 'branding') {
         loadChannelSettings();
+      }
+      if (tab === 'telegram') {
+        loadTelegramConfig();
+      }
+      if (tab === 'discovery') {
+        loadDiscoveryChannels();
+        loadDiscoveryVideos('ALL');
+      }
+    }
+
+    // -------------------------------------------------------------
+    // TELEGRAM HITL CLIENT FUNCTIONS
+    // -------------------------------------------------------------
+    async function loadTelegramConfig() {
+      try {
+        const res = await fetch('/api/telegram/config');
+        const data = await res.json();
+        document.getElementById('tg-bot-token').value = data.bot_token || '';
+        document.getElementById('tg-chat-id').value = data.chat_id || '';
+        document.getElementById('tg-enabled').checked = Boolean(data.is_enabled);
+        document.getElementById('tg-notify-ready').checked = Boolean(data.notify_on_ready);
+        document.getElementById('tg-notify-upload').checked = Boolean(data.notify_on_upload);
+
+        const pill = document.getElementById('tg-status-pill');
+        if (pill) {
+          if (data.is_enabled && data.bot_token && data.chat_id) {
+            pill.className = "text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold";
+            pill.innerText = "ACTIVE & CONNECTED";
+          } else {
+            pill.className = "text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400";
+            pill.innerText = "NOT CONFIGURED";
+          }
+        }
+      } catch (e) {
+        console.error("Failed to load telegram config", e);
+      }
+    }
+
+    async function saveTelegramSettings() {
+      try {
+        const payload = {
+          bot_token: document.getElementById('tg-bot-token').value.trim(),
+          chat_id: document.getElementById('tg-chat-id').value.trim(),
+          is_enabled: document.getElementById('tg-enabled').checked,
+          notify_on_ready: document.getElementById('tg-notify-ready').checked,
+          notify_on_upload: document.getElementById('tg-notify-upload').checked,
+        };
+        const res = await fetch('/api/telegram/config', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        alert(data.message || "Telegram settings saved!");
+        loadTelegramConfig();
+      } catch (e) {
+        alert("Failed to save telegram settings: " + e.message);
+      }
+    }
+
+    async function testTelegramConnection() {
+      try {
+        const res = await fetch('/api/telegram/test', {method: 'POST'});
+        const data = await res.json();
+        if (res.ok) {
+          alert("🎉 Success! " + data.message + " Check your Telegram app.");
+        } else {
+          alert("Telegram Error: " + (data.detail || data.message || "Failed"));
+        }
+      } catch (e) {
+        alert("Error testing Telegram: " + e.message);
+      }
+    }
+
+    async function sendTelegramReviewCard(videoId) {
+      try {
+        const res = await fetch(`/api/telegram/send-review/${videoId}`, {method: 'POST'});
+        const data = await res.json();
+        if (res.ok) {
+          alert(`📲 Review card sent to Telegram for Video #${videoId}! Check your phone.`);
+        } else {
+          alert("Telegram Error: " + (data.detail || "Configure Telegram Bot Token & Chat ID in the Telegram HITL tab first."));
+        }
+      } catch (e) {
+        alert("Error sending to Telegram: " + e.message);
+      }
+    }
+
+    // -------------------------------------------------------------
+    // COMPETITOR DISCOVERY & VIRAL RADAR CLIENT FUNCTIONS
+    // -------------------------------------------------------------
+    async function loadDiscoveryChannels(targetChannelId = null) {
+      try {
+        const cid = targetChannelId || activeChannelId;
+        const url = cid ? `/api/discovery/channels?channel_id=${cid}` : '/api/discovery/channels';
+        const res = await fetch(url);
+        const list = await res.json();
+        const pillsContainer = document.getElementById('tracked-channels-pills');
+        if (!pillsContainer) return;
+        const chName = activeChannelObj ? activeChannelObj.channel_name : 'Current Channel';
+        if (!list || list.length === 0) {
+          pillsContainer.innerHTML = `<span class="text-xs text-slate-500">No channels tracked for <strong>${chName}</strong> yet. Scan any YouTube competitor channel URL above!</span>`;
+          return;
+        }
+        pillsContainer.innerHTML = list.map(c => `
+          <div class="px-2.5 py-1 rounded-full bg-slate-900 border border-slate-700 text-xs text-slate-300 flex items-center gap-1.5 shadow">
+            <i class="fa-brands fa-youtube text-red-500 text-[10px]"></i>
+            <span class="font-bold text-white">${c.channel_name}</span>
+            <span class="text-[10px] text-slate-400">(${c.scraped_video_count || 0} videos)</span>
+          </div>
+        `).join('');
+      } catch (e) {
+        console.error("Failed to load discovery channels", e);
+      }
+    }
+
+    async function loadDiscoveryVideos(filterType = 'ALL', targetChannelId = null) {
+      try {
+        const cid = targetChannelId || activeChannelId;
+        let url = `/api/discovery/videos?limit=50`;
+        if (cid) url += `&parent_channel_id=${cid}`;
+        if (filterType === 'SHORTS') url += '&is_short=true';
+        if (filterType === 'LONG') url += '&is_short=false';
+
+        const res = await fetch(url);
+        const videos = await res.json();
+        const tbody = document.getElementById('discovery-videos-tbody');
+        if (!tbody) return;
+
+        if (!videos || videos.length === 0) {
+          const chName = activeChannelObj ? activeChannelObj.channel_name : 'Current Channel';
+          tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-slate-500">No competitor videos found for <strong>${chName}</strong>. Scan a competitor channel above to inspect breakout videos!</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = videos.map(v => {
+          const isShort = Boolean(v.is_short);
+          const velocity = Number(v.view_velocity || 0).toLocaleString();
+          const views = Number(v.view_count || 0).toLocaleString();
+          const cleanTitle = (v.title || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+          return `
+            <tr class="table-row">
+              <td class="p-3">
+                <div class="relative w-16 h-10 rounded overflow-hidden border border-slate-700 bg-slate-950 flex-shrink-0">
+                  <img src="${v.thumbnail_url || ''}" class="w-full h-full object-cover" onerror="this.style.display='none'">
+                </div>
+              </td>
+              <td class="p-3 max-w-sm">
+                <div class="font-bold text-slate-200 truncate" title="${cleanTitle}">${cleanTitle}</div>
+                <div class="text-[10px] text-slate-400 flex items-center gap-2 mt-0.5">
+                  <span class="text-indigo-400"><i class="fa-brands fa-youtube mr-1"></i>${v.competitor_name || 'Channel'}</span>
+                  <span>•</span>
+                  <span>${v.upload_date || 'Recent'}</span>
+                  <span>•</span>
+                  <span>${Math.round(v.duration_seconds || 0)}s</span>
+                </div>
+              </td>
+              <td class="p-3 text-center">
+                ${isShort ? 
+                  '<span class="px-2 py-0.5 rounded text-[10px] bg-red-950 text-red-400 border border-red-800 font-bold">⚡ SHORT</span>' : 
+                  '<span class="px-2 py-0.5 rounded text-[10px] bg-blue-950 text-blue-400 border border-blue-800 font-bold">🎬 LONG</span>'}
+              </td>
+              <td class="p-3 text-right">
+                <span class="px-2 py-0.5 rounded text-[11px] bg-rose-950/80 text-rose-300 border border-rose-800 font-mono font-bold">
+                  🔥 ${velocity} /day
+                </span>
+              </td>
+              <td class="p-3 text-right font-mono text-slate-300">${views}</td>
+              <td class="p-3 text-right whitespace-nowrap space-x-1">
+                <a href="${v.video_url}" target="_blank" class="text-xs px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 inline-flex items-center gap-1">
+                  <i class="fa-solid fa-arrow-up-right-from-square text-[9px]"></i> View
+                </a>
+                <button onclick="navigator.clipboard.writeText('${cleanTitle}'); alert('Copied title to clipboard: ${cleanTitle}');" class="text-xs px-2 py-1 rounded bg-purple-950/80 hover:bg-purple-900 text-purple-300 border border-purple-800/80 inline-flex items-center gap-1" title="Copy title to clipboard">
+                  <i class="fa-regular fa-copy text-[9px]"></i> Copy
+                </button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } catch (e) {
+        console.error("Failed to load discovery videos", e);
+      }
+    }
+
+    async function startCompetitorScan() {
+      const urlInput = document.getElementById('discovery-channel-url');
+      const maxItemsInput = document.getElementById('discovery-max-items');
+      const btn = document.getElementById('btn-scan-competitor');
+
+      const channelUrl = urlInput.value.trim();
+      if (!channelUrl) {
+        alert("Please enter a competitor channel URL (e.g. https://www.youtube.com/@competitor)");
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-[11px]"></i> Scanning...';
+
+      try {
+        const res = await fetch('/api/discovery/scan', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            channel_url: channelUrl,
+            max_items: parseInt(maxItemsInput.value || 50),
+            channel_id: activeChannelId || 1
+          })
+        });
+        const data = await res.json();
+        alert(data.message || "Scan initiated in background!");
+        urlInput.value = '';
+        setTimeout(() => {
+          loadDiscoveryChannels(activeChannelId);
+          loadDiscoveryVideos('ALL', activeChannelId);
+        }, 3000);
+      } catch (e) {
+        alert("Failed to start scan: " + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-magnifying-glass text-[11px]"></i> Scan Radar';
       }
     }
 
@@ -2706,6 +3648,13 @@ DASHBOARD_HTML = """
         }
         if (countBadgeEl) countBadgeEl.innerText = ALL_CHANNELS.length;
         if (dropdownCountEl) dropdownCountEl.innerText = `${ALL_CHANNELS.length} Account${ALL_CHANNELS.length === 1 ? '' : 's'}`;
+
+        // Update Source Folder Input for this Channel
+        const scanFolderInput = document.getElementById('scan-folder-input');
+        if (scanFolderInput && activeChannelObj) {
+          scanFolderInput.value = activeChannelObj.raw_folder_path || '';
+          scanFolderInput.placeholder = `Raw videos folder for "${activeChannelObj.channel_name}" (e.g. C:\\Videos\\${activeChannelObj.channel_name})...`;
+        }
 
         const isAuth = activeChannelObj && activeChannelObj.is_authenticated == 1;
         if (activeIndicatorEl) {
@@ -2887,6 +3836,8 @@ DASHBOARD_HTML = """
           }
           await loadChannels();
           await loadChannelSettings();
+          await loadDiscoveryChannels(channelId);
+          await loadDiscoveryVideos('ALL', channelId);
           fetchStatus();
           loadVideos();
           loadParts();
@@ -2941,6 +3892,65 @@ DASHBOARD_HTML = """
       await loadChannels();
       fetchStatus();
       alert("✓ Verification completed for all connected accounts.");
+    }
+
+    // -------------------------------------------------------------
+    // MASTER AUTOPILOT CLIENT FUNCTIONS
+    // -------------------------------------------------------------
+    function openMasterAutopilotModal() {
+      const scopeSel = document.getElementById('master-target-scope');
+      if (scopeSel && ALL_CHANNELS) {
+        scopeSel.innerHTML = `
+          <option value="${ACTIVE_CHANNEL_ID || 1}">⚡ Active Channel: ${CURRENT_CHANNEL_DATA?.channel_name || 'Current Channel'} (Recommended)</option>
+          <option value="ALL">🌐 All Channels Sequentially (Full Network)</option>
+          ${ALL_CHANNELS.filter(c => c.id !== ACTIVE_CHANNEL_ID).map(c => `<option value="${c.id}">Channel: ${c.channel_name}</option>`).join('')}
+        `;
+      }
+      document.getElementById('modal-master-autopilot').classList.remove('hidden');
+      document.getElementById('modal-master-autopilot').classList.add('flex');
+    }
+
+    function closeMasterAutopilotModal() {
+      document.getElementById('modal-master-autopilot').classList.add('hidden');
+      document.getElementById('modal-master-autopilot').classList.remove('flex');
+    }
+
+    async function submitMasterAutopilot() {
+      const scope = document.getElementById('master-target-scope').value;
+      const folder = document.getElementById('master-folder-path').value.trim();
+      const maxVids = parseInt(document.getElementById('master-max-videos').value || 2);
+      const partsPerVid = parseInt(document.getElementById('master-parts-per-video').value || 3);
+      const doSlice = document.getElementById('master-step-slice').checked;
+      const doUpload = document.getElementById('master-step-upload').checked;
+
+      const btn = document.getElementById('btn-submit-autopilot');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-[10px]"></i> Launching...';
+
+      try {
+        const res = await fetch('/api/master/run', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            channel_id: scope,
+            raw_folder_path: folder,
+            max_videos: maxVids,
+            slice_parts: doSlice,
+            parts_per_video: partsPerVid,
+            auto_upload: doUpload,
+            headless: true
+          })
+        });
+        const data = await res.json();
+        alert("🚀 " + (data.message || "Master Autopilot launched in background!"));
+        closeMasterAutopilotModal();
+        fetchStatus();
+      } catch (e) {
+        alert("Failed to launch Master Autopilot: " + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-play text-[10px]"></i> Launch Autopilot';
+      }
     }
 
     function openCreateChannelModal() {
@@ -3308,7 +4318,8 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
 
     async function fetchStatus() {
       try {
-        const res = await fetch('/api/system-status');
+        const cid = activeChannelId || 1;
+        const res = await fetch(`/api/system-status?channel_id=${cid}`);
         const data = await res.json();
         
         // Update Health Badges
@@ -3464,6 +4475,9 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
                   <button onclick="uploadSingleVideoConfirm(${v.id}, '${safeTitle}')" class="text-xs px-2.5 py-1 rounded bg-red-950/80 hover:bg-red-900 text-red-300 border border-red-800/80 font-semibold inline-flex items-center gap-1">
                     <i class="fa-solid fa-cloud-arrow-up text-[9px]"></i> Upload
                   </button>
+                  <button onclick="sendTelegramReviewCard(${v.id})" class="text-xs px-2 py-1 rounded bg-sky-950/80 hover:bg-sky-900 text-sky-300 border border-sky-800/80 font-medium inline-flex items-center gap-1" title="Send review card to Telegram">
+                    <i class="fa-brands fa-telegram text-[10px]"></i> TG
+                  </button>
                 ` : ''}
                 <button onclick="generateSingleThumbnail(${v.id})" class="text-xs text-purple-400 hover:text-purple-300 px-1" title="Generate AI Thumbnail">
                   <i class="fa-solid fa-wand-magic-sparkles"></i> Thumb
@@ -3567,6 +4581,9 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
                 </button>
                 <button onclick="uploadSingleVideoConfirm(${p.id}, '${safePartTitle}')" class="text-xs px-2.5 py-1 rounded bg-red-950/80 hover:bg-red-900 text-red-300 border border-red-800/80 font-semibold inline-flex items-center gap-1.5 transition shadow">
                   <i class="fa-solid fa-cloud-arrow-up text-[9px]"></i> Upload
+                </button>
+                <button onclick="sendTelegramReviewCard(${p.id})" class="text-xs px-2.5 py-1 rounded bg-sky-950/80 hover:bg-sky-900 text-sky-300 border border-sky-800/80 font-medium inline-flex items-center gap-1.5 transition shadow" title="Send review card to Telegram">
+                  <i class="fa-brands fa-telegram text-[10px]"></i> TG
                 </button>
                 <button onclick="viewSeoDetails(${idx}, true)" class="text-xs text-blue-400 hover:text-blue-300 px-1 py-1">
                   <i class="fa-regular fa-eye"></i> SEO
@@ -3819,14 +4836,47 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
       }
     }
 
+    async function saveChannelSourceFolder() {
+      const scanInput = document.getElementById('scan-folder-input');
+      if (!scanInput) return;
+      const folder = scanInput.value.trim();
+      const cid = activeChannelId || 1;
+      try {
+        await fetch(`/api/channels/${cid}/source-folder`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ folder: folder })
+        });
+        if (activeChannelObj) activeChannelObj.raw_folder_path = folder;
+        const ch = ALL_CHANNELS.find(c => c.id === cid);
+        if (ch) ch.raw_folder_path = folder;
+      } catch (e) {
+        console.error("Failed to save channel source folder:", e);
+      }
+    }
+
     async function scanFolder() {
-      const folder = document.getElementById('scan-folder-input').value.trim();
-      if (!folder) return alert("Please enter a folder path.");
-      await fetch('/api/scan', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({folder})
-      });
+      const folderInput = document.getElementById('scan-folder-input');
+      const folder = folderInput ? folderInput.value.trim() : '';
+      if (!folder) return alert("Please enter a valid folder path.");
+      const cid = activeChannelId || 1;
+      try {
+        const res = await fetch('/api/scan', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({folder: folder, channel_id: cid})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          if (activeChannelObj) activeChannelObj.raw_folder_path = folder;
+          const ch = ALL_CHANNELS.find(c => c.id === cid);
+          if (ch) ch.raw_folder_path = folder;
+        } else {
+          alert("Scan error: " + (data.detail || data.message));
+        }
+      } catch (e) {
+        console.error("Scan dispatch error:", e);
+      }
       fetchStatus();
       loadVideos();
     }
@@ -4417,8 +5467,13 @@ Target audience: children aged 3–8. The overall mood should feel joyful, safe,
 </html>
 """
 
+TEMPLATES_DIR = BASE_DIR / "templates"
+INDEX_HTML_FILE = TEMPLATES_DIR / "index.html"
+
 @app.get("/", response_class=HTMLResponse)
 def index():
+    if INDEX_HTML_FILE.exists():
+        return HTMLResponse(content=INDEX_HTML_FILE.read_text(encoding="utf-8"))
     return HTMLResponse(content=DASHBOARD_HTML)
 
 def start_dashboard(port: int = 8000, open_browser: bool = True):
