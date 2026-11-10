@@ -270,6 +270,40 @@ def api_generate_thumbnail(payload: dict):
         "prompt": v.get("thumbnail_prompt")
     }
 
+@app.post("/api/generate-single-thumbnail/{video_id}")
+def api_generate_single_thumbnail(video_id: int, background_tasks: BackgroundTasks):
+    from thumbnail_generator import generate_thumbnail_image
+    from db import get_video_by_id
+
+    v = get_video_by_id(video_id)
+    if not v:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    def _bg_thumb_worker():
+        global WORKER_STATE
+        WORKER_STATE["is_busy"] = True
+        WORKER_STATE["current_task"] = f"Generating 3D Pixar Thumbnail for #{video_id}..."
+        try:
+            generate_thumbnail_image(
+                video_id=v["id"],
+                video_path=Path(v["file_path"]),
+                title=v["title"] or v["file_name"],
+                description=v["description"] or "",
+                is_short=bool(v["is_short"]),
+                part_number=v.get("part_number"),
+                force_ai=True,
+                channel_id=v.get("channel_id")
+            )
+            WORKER_STATE["last_message"] = f"Thumbnail generated for video #{video_id}"
+        except Exception as e:
+            WORKER_STATE["last_message"] = f"Thumbnail generation error: {e}"
+        finally:
+            WORKER_STATE["is_busy"] = False
+            WORKER_STATE["current_task"] = "Idle"
+
+    background_tasks.add_task(_bg_thumb_worker)
+    return {"message": f"AI Thumbnail generation started for Video #{video_id}"}
+
 @app.post("/api/generate-all-thumbnails")
 def api_generate_all_thumbnails(payload: dict, background_tasks: BackgroundTasks):
     target_type = payload.get("target_type", "SHORTS")
@@ -661,12 +695,22 @@ def api_set_channel_source_folder(channel_id: int, payload: dict):
     update_channel_source_folder(channel_id, folder)
     return {"message": "Channel source folder updated", "channel_id": channel_id, "folder": folder}
 
-def bg_generate_seo(limit: int = 10):
+def bg_generate_seo(limit: int = 10, video_ids: Optional[list] = None):
     global WORKER_STATE
     WORKER_STATE["is_busy"] = True
-    WORKER_STATE["current_task"] = f"Generating AI SEO (batch of {limit})..."
+    desc = f"{len(video_ids)} specific videos" if video_ids else f"batch of {limit}"
+    WORKER_STATE["current_task"] = f"Generating AI SEO ({desc})..."
     try:
-        pending = get_videos_by_status("SCANNED")[:limit]
+        from db import get_videos_by_status, get_video_by_id
+        if video_ids:
+            pending = []
+            for vid in video_ids:
+                row = get_video_by_id(int(vid))
+                if row:
+                    pending.append(row)
+        else:
+            pending = get_videos_by_status("SCANNED")[:limit]
+
         for idx, item in enumerate(pending, 1):
             WORKER_STATE["current_task"] = f"Generating SEO ({idx}/{len(pending)}): {item['file_name']}"
             res = generate_video_seo(Path(item["file_path"]), is_short=bool(item["is_short"]))
@@ -688,8 +732,10 @@ def bg_generate_seo(limit: int = 10):
 @app.post("/api/generate-seo")
 def api_generate_seo(payload: dict, background_tasks: BackgroundTasks):
     limit = payload.get("limit", 10)
-    background_tasks.add_task(bg_generate_seo, limit)
-    return {"message": f"AI SEO generation started for {limit} videos"}
+    video_ids = payload.get("video_ids")
+    background_tasks.add_task(bg_generate_seo, limit, video_ids)
+    msg = f"AI SEO generation started for {len(video_ids)} video(s)" if video_ids else f"AI SEO generation started for {limit} videos"
+    return {"message": msg}
 
 @app.post("/api/schedule-all")
 def api_schedule_all():
@@ -1213,13 +1259,6 @@ def api_create_shorts(payload: dict, background_tasks: BackgroundTasks):
     add_parts_label = payload.get("add_parts_label", True)
     background_tasks.add_task(bg_create_shorts, video_id, num_parts, add_parts_label)
     return {"message": "Shorts generation started in background"}
-
-@app.post("/api/upload-next")
-def api_upload_next(payload: dict, background_tasks: BackgroundTasks):
-    limit = payload.get("limit", 1)
-    headless = payload.get("headless", False)
-    background_tasks.add_task(bg_upload_next, limit, headless)
-    return {"message": f"Upload started for next {limit} video(s)"}
 
 # -------------------------------------------------------------
 # COMMAND RUNNER & TERMINAL CONSOLE LOGGING

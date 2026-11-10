@@ -96,7 +96,8 @@ def init_db():
         ("logo_size", "INTEGER DEFAULT 110"),
         ("logo_opacity", "REAL DEFAULT 0.9"),
         ("show_outro", "BOOLEAN DEFAULT 1"),
-        ("outro_duration_sec", "REAL DEFAULT 3.5")
+        ("outro_duration_sec", "REAL DEFAULT 3.5"),
+        ("raw_folder_path", "TEXT DEFAULT ''")
     ]:
         try:
             cursor.execute(f"ALTER TABLE channels ADD COLUMN {col} {col_type}")
@@ -591,11 +592,45 @@ def delete_channel(channel_id: int):
         cursor.execute("SELECT COUNT(*) FROM channels")
         if cursor.fetchone()[0] <= 1:
             raise Exception("Cannot delete the only channel in the system.")
+        
+        # Resolve fallback channel dynamically (satisfies Invariant 2)
+        cursor.execute("SELECT id FROM channels WHERE id != ? ORDER BY is_active DESC, id ASC LIMIT 1", (channel_id,))
+        fallback_row = cursor.fetchone()
+        fallback_id = fallback_row[0] if fallback_row else None
+
         cursor.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
-        # Reassign orphan videos to channel 1
-        cursor.execute("UPDATE videos SET channel_id = 1 WHERE channel_id = ?", (channel_id,))
+        if fallback_id:
+            cursor.execute("UPDATE videos SET channel_id = ? WHERE channel_id = ?", (fallback_id, channel_id))
+            cursor.execute("UPDATE discovery_channels SET channel_id = ? WHERE channel_id = ?", (fallback_id, channel_id))
+            cursor.execute("SELECT COUNT(*) FROM channels WHERE is_active = 1")
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("UPDATE channels SET is_active = 1 WHERE id = ?", (fallback_id,))
         conn.commit()
         return True
+    finally:
+        conn.close()
+
+def reset_channel(channel_id: int):
+    """
+    Resets all videos, shorts, scheduled drops, and competitor radar data for a specific channel
+    back to clean slate, while strictly preserving Google authentication session cookies and branding settings.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        # Delete competitor discovery videos for this channel
+        cursor.execute("DELETE FROM discovery_videos WHERE discovery_channel_id IN (SELECT id FROM discovery_channels WHERE channel_id = ?)", (channel_id,))
+        cursor.execute("DELETE FROM discovery_channels WHERE channel_id = ?", (channel_id,))
+        
+        # Delete videos belonging to this channel
+        cursor.execute("DELETE FROM videos WHERE channel_id = ?", (channel_id,))
+        deleted_count = cursor.rowcount
+        conn.commit()
+        return {
+            "success": True,
+            "message": f"Channel #{channel_id} operational state reset successfully. Removed {deleted_count} queued video(s). Cookies and branding preserved.",
+            "deleted_videos": deleted_count
+        }
     finally:
         conn.close()
 
@@ -618,6 +653,27 @@ def assign_videos_to_channel(video_ids: list, channel_id: int):
         cursor.execute(f"UPDATE videos SET channel_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders})", [channel_id] + video_ids)
         conn.commit()
         return cursor.rowcount
+    finally:
+        conn.close()
+
+def get_video_by_id(video_id: int) -> Optional[dict]:
+    """Retrieve a single video record by ID with channel metadata."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        query = """
+        SELECT 
+            v.*,
+            c.channel_name,
+            c.channel_key,
+            c.profile_dir
+        FROM videos v
+        LEFT JOIN channels c ON v.channel_id = c.id
+        WHERE v.id = ?
+        """
+        cursor.execute(query, (video_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
     finally:
         conn.close()
 

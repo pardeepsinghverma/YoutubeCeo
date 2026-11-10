@@ -37,6 +37,9 @@ def inspect_video(video_path: Path):
         width = int(res_match.group(1))
         height = int(res_match.group(2))
 
+    # Check for audio stream
+    has_audio = bool(re.search(r"Stream\s*#\d+:\d+.*?: Audio:", output, re.IGNORECASE))
+
     # Determine if it's a Short
     # YouTube Short: Duration <= 60 seconds and vertical/square (height >= width)
     is_short = False
@@ -48,6 +51,7 @@ def inspect_video(video_path: Path):
         "width": width,
         "height": height,
         "is_short": is_short,
+        "has_audio": has_audio,
         "file_size_mb": file_size_mb
     }
 

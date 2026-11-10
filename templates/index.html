@@ -2641,6 +2641,8 @@ Type or select any CLI command above to execute.</pre>
 
             <option value="LONG">Long Videos Only</option>
 
+            <option value="CUSTOM_IDS">Selected Videos Only</option>
+
           </select>
 
         </div>
@@ -3120,8 +3122,6 @@ Type or select any CLI command above to execute.</pre>
     let ALL_PARTS = [];
 
     let currentParentFilter = null;
-
-    let consolePollInterval = null;
 
 
 
@@ -4269,11 +4269,6 @@ Type or select any CLI command above to execute.</pre>
                     <i class="fa-solid fa-rotate-right text-[8px]"></i> Retry
                   </button>
                 ` : ''}
-                ${v.status === 'FAILED' ? `
-                  <button onclick="retryVideoUpload(${v.id})" class="text-xs px-2 py-0.5 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 hover:text-white border border-rose-700 font-bold shadow-sm inline-flex items-center gap-1 cursor-pointer" title="Retry upload">
-                    <i class="fa-solid fa-rotate-right text-[8px]"></i> Retry
-                  </button>
-                ` : ''}
 
               ${(isShort || isPart) ? `
 
@@ -4305,11 +4300,15 @@ Type or select any CLI command above to execute.</pre>
 
               `}
 
-              <button onclick="generateSingleThumbnail(${v.id})" class="text-xs text-purple-400 hover:text-purple-300 px-1" title="AI Thumbnail">
-
-                <i class="fa-solid fa-wand-magic-sparkles"></i>
-
-              </button>
+              ${v.thumbnail_path ? `
+                <button onclick="openThumbnailPreviewModal('/api/thumbnail/${v.id}', '${safeTitle}', '${(v.thumbnail_prompt || '').replace(/'/g, "\\'")}')" class="text-xs text-purple-400 hover:text-purple-300 px-1" title="Preview AI Thumbnail">
+                  <i class="fa-solid fa-image text-purple-400"></i>
+                </button>
+              ` : `
+                <button onclick="generateSingleThumbnail(${v.id})" class="text-xs text-purple-400 hover:text-purple-300 px-1" title="Generate AI Thumbnail">
+                  <i class="fa-solid fa-wand-magic-sparkles"></i>
+                </button>
+              `}
 
               <button onclick="viewSeoDetails(${idx})" class="text-xs text-blue-400 hover:text-blue-300 px-1" title="View SEO">
 
@@ -5054,6 +5053,16 @@ Type or select any CLI command above to execute.</pre>
                     <i class="fa-brands fa-telegram text-[10px]"></i> TG
 
                   </button>
+
+                  ${v.thumbnail_path ? `
+                    <button onclick="openThumbnailPreviewModal('/api/thumbnail/${v.id}', '${safeTitle}', '${(v.thumbnail_prompt || '').replace(/'/g, "\\'")}')" class="text-xs px-2 py-1 rounded bg-purple-950 hover:bg-purple-900 text-purple-300 border border-purple-800 font-medium inline-flex items-center gap-1" title="Preview AI Thumbnail">
+                      <i class="fa-solid fa-image text-[10px]"></i>
+                    </button>
+                  ` : `
+                    <button onclick="generateSingleThumbnail(${v.id})" class="text-xs px-2 py-1 rounded bg-purple-950/80 hover:bg-purple-900 text-purple-300 border border-purple-800 font-medium inline-flex items-center gap-1" title="Generate AI Thumbnail">
+                      <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i>
+                    </button>
+                  `}
 
                   <button onclick="deleteVideoConfirm(${v.id}, '${safeTitle}')" class="text-xs px-2 py-1 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 font-medium inline-flex items-center gap-1" title="Delete Short">
 
@@ -6469,7 +6478,7 @@ Type or select any CLI command above to execute.</pre>
 
         if (data.authenticated || data.is_authenticated) {
 
-          showToast(`✅ Verified! Studio session is valid and active for channel #${channelId} (${data.channel_name || ''}, 'success');.`);
+          showToast(`✅ Verified! Studio session is valid and active for channel #${channelId} (${data.channel_name || ''}).`, 'success');
 
         } else {
 
@@ -6921,7 +6930,7 @@ Type or select any CLI command above to execute.</pre>
 
         const data = await res.json();
 
-        showToast(`🚀 Upload started for ${limit} video(s, 'success'); to "${activeChannelObj ? activeChannelObj.channel_name : 'channel'}".`);
+        showToast(`🚀 Upload started for ${limit} video(s) to "${activeChannelObj ? activeChannelObj.channel_name : 'channel'}".`, 'success');
 
         fetchStatus();
 
@@ -7039,13 +7048,17 @@ Type or select any CLI command above to execute.</pre>
 
     // -------------------------------------------------------------
 
-    function openScheduleModal(scope = 'ALL', parentId = null) {
+    function openScheduleModal(scope = 'ALL', parentId = null, customIds = null) {
 
       const modal = document.getElementById('modal-smart-schedule');
 
-      document.getElementById('modal-sched-scope').value = scope;
+      const scopeSelect = document.getElementById('modal-sched-scope');
+
+      if (scopeSelect) scopeSelect.value = scope;
 
       modal.dataset.parentId = parentId || '';
+
+      modal.dataset.customIds = customIds && customIds.length > 0 ? JSON.stringify(customIds) : '';
 
       modal.classList.remove('hidden');
 
@@ -7083,6 +7096,16 @@ Type or select any CLI command above to execute.</pre>
 
       const parentId = modal.dataset.parentId ? parseInt(modal.dataset.parentId) : null;
 
+      const customIdsStr = modal.dataset.customIds;
+
+      let customIds = null;
+
+      if (customIdsStr) {
+
+        try { customIds = JSON.parse(customIdsStr); } catch (e) {}
+
+      }
+
 
 
       closeScheduleModal();
@@ -7118,6 +7141,12 @@ Type or select any CLI command above to execute.</pre>
         };
 
         if (parentId) payload.parent_id = parentId;
+
+        if (scope === 'CUSTOM_IDS' || (customIds && customIds.length > 0)) {
+
+          payload.video_ids = customIds;
+
+        }
 
 
 
@@ -7915,6 +7944,61 @@ Type or select any CLI command above to execute.</pre>
       openScheduleModal('CUSTOM_IDS', null, ids);
     }
 
+    async function executeBulkSeo() {
+      const ids = Array.from(SELECTED_VIDEO_IDS);
+      if (ids.length === 0) return;
+
+      const confirmed = await showConfirm(
+        "Generate AI SEO for Selected Videos?",
+        `Generate viral AI titles, descriptions, and tags using Gemini for ${ids.length} selected video(s)?`,
+        "Generate SEO",
+        false
+      );
+      if (!confirmed) return;
+
+      try {
+        const res = await fetch('/api/generate-seo', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ video_ids: ids, limit: ids.length })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(data.message || `Started AI SEO generation for ${ids.length} video(s)!`, 'info');
+          clearVideoSelection();
+          fetchStatus();
+        } else {
+          showToast("Bulk SEO failed: " + (data.detail || data.message), 'error');
+        }
+      } catch (err) {
+        showToast("Bulk SEO error: " + err, 'error');
+      }
+    }
+
+    function openThumbnailPreviewModal(imgUrl, title = 'Generated 3D Pixar Thumbnail', prompt = '') {
+      const modal = document.getElementById('modal-thumbnail-preview');
+      const img = document.getElementById('thumb-preview-img');
+      const titleEl = document.getElementById('thumb-preview-title');
+      const promptEl = document.getElementById('thumb-preview-prompt');
+
+      if (titleEl) titleEl.innerText = title;
+      if (img) img.src = imgUrl || '';
+      if (promptEl) promptEl.innerText = prompt || 'AI generated cinematic thumbnail.';
+
+      if (modal) {
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      }
+    }
+
+    function closeThumbnailPreviewModal() {
+      const modal = document.getElementById('modal-thumbnail-preview');
+      if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+      }
+    }
+
     // =============================================================
     // 1-CLICK RETRY ON FAILED UPLOADS
     // =============================================================
@@ -7967,7 +8051,7 @@ Type or select any CLI command above to execute.</pre>
                   <span class="text-amber-400/90">${v.status}</span>
                 </div>
               </div>
-              <button onclick="closeSelectLongVideoModal(); openSliceModal(${v.id}, '${safeTitle}', ${v.duration_seconds || 0})" 
+              <button onclick="closeSelectLongVideoModal(); openCutShortsModal(${v.id}, '${safeTitle}', ${v.duration_seconds || 0})" 
                       class="px-3 py-1.5 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap">
                 <i class="fa-solid fa-bolt text-[10px]"></i> Slice into Shorts
               </button>
