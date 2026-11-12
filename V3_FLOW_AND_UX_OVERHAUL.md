@@ -138,3 +138,4 @@ When a video is being uploaded to YouTube Studio via Playwright, the dashboard d
 - **Task 4: Verification & Flow Testing**
   - Test end-to-end user journey: Channel Switch ➔ Ingest/Scan ➔ Slice ➔ AI SEO/Thumbnail ➔ Calendar Schedule ➔ Studio Upload.
   - Verify zero console errors and strict UTF-8 subprocess handling.
+

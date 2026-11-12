@@ -67,7 +67,7 @@ def get_system_status(channel_id: Optional[int] = None):
         "gemini_connected": gemini_connected,
         "worker": WORKER_STATE,
         "stats": get_stats(channel_id=stats_ch_id if stats_ch_id != 0 else None),
-        "active_channel": active_ch,
+        "active_channel": target_ch,
         "channels_count": len(channels)
     }
 
@@ -696,7 +696,7 @@ def api_set_channel_source_folder(channel_id: int, payload: dict):
     update_channel_source_folder(channel_id, folder)
     return {"message": "Channel source folder updated", "channel_id": channel_id, "folder": folder}
 
-def bg_generate_seo(limit: int = 10, video_ids: Optional[list] = None):
+def bg_generate_seo(limit: int = 10, video_ids: Optional[list] = None, channel_id: Optional[int] = None):
     global WORKER_STATE
     WORKER_STATE["is_busy"] = True
     desc = f"{len(video_ids)} specific videos" if video_ids else f"batch of {limit}"
@@ -710,7 +710,7 @@ def bg_generate_seo(limit: int = 10, video_ids: Optional[list] = None):
                 if row:
                     pending.append(row)
         else:
-            pending = get_videos_by_status("SCANNED")[:limit]
+            pending = get_videos_by_status("SCANNED", channel_id=channel_id)[:limit]
 
         for idx, item in enumerate(pending, 1):
             WORKER_STATE["current_task"] = f"Generating SEO ({idx}/{len(pending)}): {item['file_name']}"
@@ -734,7 +734,13 @@ def bg_generate_seo(limit: int = 10, video_ids: Optional[list] = None):
 def api_generate_seo(payload: dict, background_tasks: BackgroundTasks):
     limit = payload.get("limit", 10)
     video_ids = payload.get("video_ids")
-    background_tasks.add_task(bg_generate_seo, limit, video_ids)
+    channel_id = payload.get("channel_id")
+    if channel_id is not None:
+        try:
+            channel_id = int(channel_id)
+        except Exception:
+            channel_id = None
+    background_tasks.add_task(bg_generate_seo, limit, video_ids, channel_id)
     msg = f"AI SEO generation started for {len(video_ids)} video(s)" if video_ids else f"AI SEO generation started for {limit} videos"
     return {"message": msg}
 
@@ -1059,7 +1065,7 @@ def bg_auto_upload(
     final_channel_id = target_ch["id"] if target_ch else 1
     channel_name = target_ch["channel_name"] if target_ch else "Default Channel"
 
-    statuses = status_filter or ["METADATA_READY"]
+    statuses = status_filter or ["SCHEDULED", "METADATA_READY"]
 
     conn = get_connection()
     try:
@@ -1256,10 +1262,16 @@ def bg_create_shorts(video_id: int, num_parts: int = 0, add_parts_label: bool = 
 @app.post("/api/create-shorts")
 def api_create_shorts(payload: dict, background_tasks: BackgroundTasks):
     video_id = payload.get("video_id")
+    if not video_id:
+        raise HTTPException(status_code=400, detail="Missing video_id parameter")
+    from db import get_video_by_id
+    video = get_video_by_id(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail=f"Video #{video_id} not found")
     num_parts = payload.get("num_parts", 0)
     add_parts_label = payload.get("add_parts_label", True)
     background_tasks.add_task(bg_create_shorts, video_id, num_parts, add_parts_label)
-    return {"message": "Shorts generation started in background"}
+    return {"message": f"Shorts generation started in background for Video #{video_id}"}
 
 # -------------------------------------------------------------
 # COMMAND RUNNER & TERMINAL CONSOLE LOGGING

@@ -529,6 +529,50 @@
 
 
 
+        <!-- Quick Start / New Creator Onboarding Guide -->
+        <div id="mission-onboarding-guide" class="card p-5 border border-indigo-500/40 bg-gradient-to-r from-indigo-950/40 via-slate-900 to-purple-950/30 rounded-2xl shadow-xl space-y-4">
+          <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+            <div class="flex items-center gap-2.5">
+              <div class="w-8 h-8 rounded-xl bg-indigo-600/30 border border-indigo-500 flex items-center justify-center text-indigo-400">
+                <i class="fa-solid fa-compass"></i>
+              </div>
+              <div>
+                <h3 class="text-xs font-bold text-white uppercase tracking-wider">Welcome to YoutubeCeo Autonomous Studio</h3>
+                <p class="text-[11px] text-slate-400">3 simple steps to transform raw videos into viral published Shorts</p>
+              </div>
+            </div>
+            <button onclick="toggleOnboardingGuide()" class="text-slate-400 hover:text-white text-xs px-2 py-1 rounded bg-slate-800 cursor-pointer" title="Toggle guide">
+              <i class="fa-solid fa-chevron-up" id="onboarding-guide-arrow"></i>
+            </button>
+          </div>
+
+          <div id="onboarding-guide-steps" class="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+            <div class="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1.5">
+              <div class="flex items-center gap-2 text-indigo-400 text-xs font-bold">
+                <span class="w-5 h-5 rounded-full bg-indigo-900/80 border border-indigo-600 text-[10px] flex items-center justify-center text-white font-mono">1</span>
+                <span>Connect YouTube Studio</span>
+              </div>
+              <p class="text-[11px] text-slate-400 leading-relaxed">Click <b>"Open Studio Chrome"</b> above to sign into Google once. Stealth automation publishes directly with <b>zero API quotas</b>!</p>
+            </div>
+
+            <div class="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1.5">
+              <div class="flex items-center gap-2 text-amber-400 text-xs font-bold">
+                <span class="w-5 h-5 rounded-full bg-amber-900/80 border border-amber-600 text-[10px] flex items-center justify-center text-white font-mono">2</span>
+                <span>Scan Media Folder</span>
+              </div>
+              <p class="text-[11px] text-slate-400 leading-relaxed">Paste your raw video folder path below and click <b>"Scan Folder"</b>. Supports <span class="font-mono text-slate-300">.mp4, .mov, .mkv</span>.</p>
+            </div>
+
+            <div class="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1.5">
+              <div class="flex items-center gap-2 text-emerald-400 text-xs font-bold">
+                <span class="w-5 h-5 rounded-full bg-emerald-900/80 border border-emerald-600 text-[10px] flex items-center justify-center text-white font-mono">3</span>
+                <span>Auto-Produce & Publish</span>
+              </div>
+              <p class="text-[11px] text-slate-400 leading-relaxed">Click <b>"Autopilot Pipeline"</b> to slice 35s Shorts, transcribe Hinglish neon subtitles, synthesize 3D Pixar art, and drip-schedule!</p>
+            </div>
+          </div>
+        </div>
+
         <!-- Live Active Worker & Studio Publishing 8-Step Stepper HUD -->
         <div id="mission-worker-live-hud" class="hidden card p-5 border border-amber-500/50 bg-gradient-to-r from-amber-950/40 via-slate-900 to-indigo-950/40 space-y-4 rounded-2xl shadow-2xl">
           <div class="flex items-center justify-between">
@@ -597,7 +641,7 @@
 
           <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
             <!-- Stage 1: Raw Ingest -->
-            <div onclick="openStageInContentStudio('RAW')" class="cursor-pointer p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-amber-500/50 hover:bg-slate-800/80 transition flex flex-col justify-between group shadow-sm">
+            <div id="pipeline-stage-raw" onclick="openStageInContentStudio('RAW')" class="cursor-pointer p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-amber-500/50 hover:bg-slate-800/80 transition flex flex-col justify-between group shadow-sm">
               <div class="flex items-center justify-between text-xs text-slate-400">
                 <span class="font-bold text-slate-200 group-hover:text-amber-400">1. Raw Ingest</span>
                 <i class="fa-solid fa-film text-amber-400"></i>
@@ -610,7 +654,7 @@
             </div>
 
             <!-- Stage 2: Sliced Shorts -->
-            <div onclick="openStageInContentStudio('PARTS')" class="cursor-pointer p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-orange-500/50 hover:bg-slate-800/80 transition flex flex-col justify-between group shadow-sm">
+            <div id="pipeline-stage-parts" onclick="openStageInContentStudio('PARTS')" class="cursor-pointer p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-orange-500/50 hover:bg-slate-800/80 transition flex flex-col justify-between group shadow-sm">
               <div class="flex items-center justify-between text-xs text-slate-400">
                 <span class="font-bold text-slate-200 group-hover:text-orange-400">2. Sliced Shorts</span>
                 <i class="fa-solid fa-bolt text-orange-400"></i>
@@ -623,7 +667,7 @@
             </div>
 
             <!-- Stage 3: AI Packaged -->
-            <div onclick="openStageInContentStudio('PACKAGED')" class="cursor-pointer p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-purple-500/50 hover:bg-slate-800/80 transition flex flex-col justify-between group shadow-sm">
+            <div id="pipeline-stage-packaged" onclick="openStageInContentStudio('PACKAGED')" class="cursor-pointer p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-purple-500/50 hover:bg-slate-800/80 transition flex flex-col justify-between group shadow-sm">
               <div class="flex items-center justify-between text-xs text-slate-400">
                 <span class="font-bold text-slate-200 group-hover:text-purple-400">3. AI Packaged</span>
                 <i class="fa-solid fa-wand-magic-sparkles text-purple-400"></i>
@@ -636,7 +680,7 @@
             </div>
 
             <!-- Stage 4: Scheduled -->
-            <div onclick="openStageInContentStudio('SCHEDULED')" class="cursor-pointer p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-blue-500/50 hover:bg-slate-800/80 transition flex flex-col justify-between group shadow-sm">
+            <div id="pipeline-stage-scheduled" onclick="openStageInContentStudio('SCHEDULED')" class="cursor-pointer p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-blue-500/50 hover:bg-slate-800/80 transition flex flex-col justify-between group shadow-sm">
               <div class="flex items-center justify-between text-xs text-slate-400">
                 <span class="font-bold text-slate-200 group-hover:text-blue-400">4. Scheduled</span>
                 <i class="fa-solid fa-calendar-check text-blue-400"></i>
@@ -649,7 +693,7 @@
             </div>
 
             <!-- Stage 5: Published Live -->
-            <div onclick="openStageInContentStudio('PUBLISHED')" class="cursor-pointer p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-emerald-500/50 hover:bg-slate-800/80 transition flex flex-col justify-between group shadow-sm">
+            <div id="pipeline-stage-published" onclick="openStageInContentStudio('PUBLISHED')" class="cursor-pointer p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-emerald-500/50 hover:bg-slate-800/80 transition flex flex-col justify-between group shadow-sm">
               <div class="flex items-center justify-between text-xs text-slate-400">
                 <span class="font-bold text-slate-200 group-hover:text-emerald-400">5. Published Live</span>
                 <i class="fa-solid fa-cloud-arrow-up text-emerald-400"></i>
@@ -822,6 +866,11 @@
             </button>
 
           </div>
+
+          <p class="text-[11px] text-slate-400 flex items-center gap-1.5 pt-1">
+            <i class="fa-solid fa-circle-info text-indigo-400"></i>
+            <span>Supported video formats: <b class="text-slate-300 font-mono">.mp4, .mov, .mkv</b>. Raw videos will be automatically cataloged and ready for 35-second Shorts slicing.</span>
+          </p>
 
         </div>
 
@@ -1365,7 +1414,27 @@
 
 
 
-          <!-- Frequency Selector -->
+          <!-- Unscheduled Packaged Videos Alert Banner -->
+        <div id="cal-unscheduled-banner" class="hidden card p-4 border border-blue-500/50 bg-gradient-to-r from-blue-950/40 via-slate-900 to-indigo-950/30 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
+          <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-xl bg-blue-600/30 border border-blue-500 flex items-center justify-center text-blue-400 flex-shrink-0">
+              <i class="fa-solid fa-calendar-plus text-base"></i>
+            </div>
+            <div>
+              <div class="text-xs font-bold text-white flex items-center gap-2">
+                <span id="cal-unscheduled-count" class="font-mono text-blue-300 font-black">0</span>
+                <span>Packaged Videos Waiting for Calendar Assignment</span>
+              </div>
+              <p class="text-[11px] text-slate-400 mt-0.5">Metadata and thumbnails are ready. Assign them to automated daily drop slots!</p>
+            </div>
+          </div>
+          <button onclick="openScheduleModal('ALL')" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-blue-600/20 whitespace-nowrap cursor-pointer">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+            <span>Auto-Schedule Packaged Videos</span>
+          </button>
+        </div>
+
+        <!-- Frequency Selector -->
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
 
@@ -3172,6 +3241,7 @@ Type or select any CLI command above to execute.</pre>
     let ALL_PARTS = [];
 
     let currentParentFilter = null;
+    let CURRENT_STAGE_FILTER = 'ALL';
 
 
 
@@ -3197,7 +3267,7 @@ Type or select any CLI command above to execute.</pre>
 
       'channel-dashboard': 'Mission Control',
 
-      'channel-videos': 'Video Queue',
+      'channel-videos': 'Content Studio',
 
       'channel-shorts': 'Shorts & Slicing',
 
@@ -3369,6 +3439,31 @@ Type or select any CLI command above to execute.</pre>
 
       }
 
+    }
+
+    // -------------------------------------------------------------
+    // CONTENT STUDIO STAGE FILTER CONTROLLER
+    // -------------------------------------------------------------
+
+    function setStageFilter(stage) {
+      CURRENT_STAGE_FILTER = stage || 'ALL';
+      const stages = ['ALL', 'RAW', 'PARTS', 'PACKAGED', 'SCHEDULED', 'PUBLISHED'];
+      stages.forEach(s => {
+        const btn = document.getElementById('stage-tab-' + s);
+        if (btn) {
+          if (s === CURRENT_STAGE_FILTER) {
+            btn.className = "px-3 py-1.5 rounded-lg text-xs font-bold transition bg-indigo-600 text-white shadow";
+          } else {
+            btn.className = "px-3 py-1.5 rounded-lg text-xs font-medium transition bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700";
+          }
+        }
+      });
+      loadVideos();
+    }
+
+    function openStageInContentStudio(stage) {
+      switchView('channel-videos');
+      setStageFilter(stage);
     }
 
 
@@ -4040,6 +4135,19 @@ Type or select any CLI command above to execute.</pre>
         if (scSched) scSched.innerText = stats.scheduled || 0;
         if (scPub) scPub.innerText = stats.published || 0;
 
+        // Calendar Unscheduled Packaged Drops Alert Banner
+        const calUnBanner = document.getElementById('cal-unscheduled-banner');
+        const calUnCount = document.getElementById('cal-unscheduled-count');
+        const readyCount = stats.ready_to_schedule || 0;
+        if (calUnBanner && calUnCount) {
+          calUnCount.innerText = readyCount;
+          if (readyCount > 0) {
+            calUnBanner.classList.remove('hidden');
+          } else {
+            calUnBanner.classList.add('hidden');
+          }
+        }
+
         // Mission Control 8-Step Studio Publishing Telemetry Monitor
         const mHud = document.getElementById('mission-worker-live-hud');
         const mHudFill = document.getElementById('mission-hud-fill');
@@ -4292,7 +4400,60 @@ Type or select any CLI command above to execute.</pre>
       }
 
       if (!videos || videos.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="p-8 text-center text-slate-500">No videos found matching current filters.</td></tr>';
+        if (!ALL_VIDEOS || ALL_VIDEOS.length === 0) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="8" class="p-12 text-center">
+                <div class="max-w-md mx-auto space-y-4">
+                  <div class="w-16 h-16 mx-auto rounded-2xl bg-indigo-950/60 border border-indigo-700/50 flex items-center justify-center text-indigo-400 text-2xl shadow-lg shadow-indigo-950/50">
+                    <i class="fa-solid fa-film"></i>
+                  </div>
+                  <div class="space-y-1">
+                    <h3 class="text-sm font-bold text-white">No Videos in this Channel Yet</h3>
+                    <p class="text-xs text-slate-400">Scan a media folder to import raw long-form videos, or upload clips to start slicing viral Shorts.</p>
+                  </div>
+                  <div class="pt-2 flex items-center justify-center gap-3">
+                    <button onclick="switchView('channel-dashboard'); document.getElementById('scan-folder-input')?.focus();" 
+                            class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-indigo-600/30 cursor-pointer">
+                      <i class="fa-solid fa-folder-open text-amber-300"></i>
+                      <span>Scan Raw Media Folder</span>
+                    </button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          `;
+        } else {
+          let stageMsg = "No media found in this stage.";
+          let stageAction = `<button onclick="setStageFilter('ALL')" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs cursor-pointer">View All Media</button>`;
+          if (CURRENT_STAGE_FILTER === 'RAW') {
+            stageMsg = "All raw videos have already been processed into sliced Shorts, or none are ingested.";
+            stageAction = `<button onclick="setStageFilter('ALL')" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs cursor-pointer">View All Media</button>`;
+          } else if (CURRENT_STAGE_FILTER === 'PARTS') {
+            stageMsg = "No sliced Shorts generated yet. Ingest raw videos first and click 'Slice Shorts'.";
+            stageAction = `<button onclick="setStageFilter('RAW')" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs cursor-pointer">Go to Raw Ingest</button>`;
+          } else if (CURRENT_STAGE_FILTER === 'PACKAGED') {
+            stageMsg = "No videos with metadata ready. Run Gemini AI SEO to generate titles, descriptions, and 3D Pixar thumbnails.";
+            stageAction = `<button onclick="generateSeoBatch()" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded text-xs cursor-pointer">Run AI SEO Batch</button>`;
+          } else if (CURRENT_STAGE_FILTER === 'SCHEDULED') {
+            stageMsg = "No videos queued for future drops. Package your Shorts and click 'Auto-Schedule All'.";
+            stageAction = `<button onclick="openScheduleModal('ALL')" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs cursor-pointer">Auto-Schedule Pending</button>`;
+          } else if (CURRENT_STAGE_FILTER === 'PUBLISHED') {
+            stageMsg = "No videos marked as Published Live yet. Connect YouTube Studio to launch scheduled uploads.";
+            stageAction = `<button onclick="openUploadModal('ALL')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-xs cursor-pointer">Launch Studio Uploads</button>`;
+          }
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="8" class="p-10 text-center">
+                <div class="max-w-sm mx-auto space-y-3">
+                  <div class="text-slate-500 text-2xl"><i class="fa-solid fa-filter-circle-xmark"></i></div>
+                  <div class="text-xs text-slate-300 font-medium">${stageMsg}</div>
+                  <div class="pt-1">${stageAction}</div>
+                </div>
+              </td>
+            </tr>
+          `;
+        }
         return;
       }
 
@@ -6291,63 +6452,64 @@ Type or select any CLI command above to execute.</pre>
 
 
     async function scanFolder() {
-
       const folderInput = document.getElementById('scan-folder-input');
-
       const folder = folderInput ? folderInput.value.trim() : '';
-
-      if (!folder) return showToast("Please enter a valid folder path.", 'warning');
-
+      if (!folder) return showToast("Please enter a valid local folder path.", 'warning');
       const cid = activeChannelId || 1;
 
       try {
-
         const res = await fetch('/api/scan', {
-
           method: 'POST',
-
           headers: {'Content-Type': 'application/json'},
-
           body: JSON.stringify({folder: folder, channel_id: cid})
-
         });
-
-        const data = await res.json();
-
-        showToast(data.message || "Folder scan started in background!", 'info');
-
-        if (activeChannelObj) activeChannelObj.raw_folder_path = folder;
-
+        const rawText = await res.text();
+        let data = {};
+        try {
+          data = JSON.parse(rawText);
+        } catch (_) {
+          data = { detail: rawText || `HTTP ${res.status}` };
+        }
+        if (res.ok) {
+          showToast(data.message || "📁 Raw media folder scan started in background!", 'success');
+          if (activeChannelObj) activeChannelObj.raw_folder_path = folder;
+        } else {
+          showToast("Scan error: " + (data.detail || data.message || "Folder does not exist"), 'error');
+        }
       } catch (e) {
-
         showToast("Scan dispatch error: " + e, 'error');
-
       }
-
       fetchStatus();
-
       loadVideos();
-
     }
 
 
 
     async function generateSeoBatch() {
-
-      await fetch('/api/generate-seo', {
-
-        method: 'POST',
-
-        headers: {'Content-Type': 'application/json'},
-
-        body: JSON.stringify({limit: 10})
-
-      });
-
+      try {
+        const cid = activeChannelId || 1;
+        const res = await fetch('/api/generate-seo', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({limit: 10, channel_id: cid})
+        });
+        const rawText = await res.text();
+        let data = {};
+        try {
+          data = JSON.parse(rawText);
+        } catch (_) {
+          data = { detail: rawText || `HTTP ${res.status}` };
+        }
+        if (res.ok) {
+          showToast(data.message || "✨ Gemini AI SEO generation started in background!", 'success');
+        } else {
+          showToast("AI SEO error: " + (data.detail || data.message || "Failed to launch"), 'error');
+        }
+      } catch (e) {
+        showToast("AI SEO dispatch failed: " + e, 'error');
+      }
       fetchStatus();
-
       loadVideos();
-
     }
 
 
@@ -6466,6 +6628,16 @@ Type or select any CLI command above to execute.</pre>
     // CHANNEL MANAGEMENT MODALS & HELPERS
 
     // -------------------------------------------------------------
+
+    function toggleOnboardingGuide() {
+      const el = document.getElementById('onboarding-guide-steps');
+      const arrow = document.getElementById('onboarding-guide-arrow');
+      if (!el) return;
+      el.classList.toggle('hidden');
+      if (arrow) {
+        arrow.className = el.classList.contains('hidden') ? 'fa-solid fa-chevron-down' : 'fa-solid fa-chevron-up';
+      }
+    }
 
     function openCreateChannelModal() {
 
@@ -6960,31 +7132,28 @@ Type or select any CLI command above to execute.</pre>
 
 
     async function startCutShorts() {
-
       const vidId = document.getElementById('modal-video-id').value;
-
       const parts = parseInt(document.getElementById('modal-parts-count').value);
-
       const label = document.getElementById('modal-parts-label-toggle').checked;
-
       closeCutShortsModal();
 
-
-
-      await fetch('/api/create-shorts', {
-
-        method: 'POST',
-
-        headers: {'Content-Type': 'application/json'},
-
-        body: JSON.stringify({video_id: vidId, num_parts: parts, add_parts_label: label})
-
-      });
-
-      showToast(`Shorts generation launched for Video #${vidId}!`, 'success');
-
+      try {
+        const res = await fetch('/api/create-shorts', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({video_id: vidId, num_parts: parts, add_parts_label: label})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(data.message || `⚡ Shorts slicing launched for Video #${vidId}!`, 'success');
+        } else {
+          showToast("Slicing error: " + (data.detail || data.message || "Failed to start"), 'error');
+        }
+      } catch (e) {
+        showToast("Shorts dispatch error: " + e, 'error');
+      }
       fetchStatus();
-
+      loadVideos();
     }
 
 

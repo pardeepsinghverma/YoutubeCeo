@@ -212,7 +212,7 @@ def add_video(file_path, file_name, file_size_mb, duration_seconds, width, heigh
             is_short = excluded.is_short,
             parent_video_id = COALESCE(excluded.parent_video_id, videos.parent_video_id),
             part_number = COALESCE(excluded.part_number, videos.part_number),
-            channel_id = COALESCE(videos.channel_id, excluded.channel_id),
+            channel_id = COALESCE(excluded.channel_id, videos.channel_id),
             updated_at = CURRENT_TIMESTAMP
         """, (str(file_path), file_name, file_size_mb, duration_seconds, width, height, 1 if is_short else 0, parent_video_id, part_number, resolved_channel_id))
         conn.commit()
@@ -564,7 +564,7 @@ def update_channel(channel_id: int, **fields):
             "schedule_frequency", "schedule_interval_days", "shorts_schedule_times",
             "long_schedule_times", "is_active", "is_authenticated",
             "show_logo", "logo_position", "logo_size", "logo_opacity",
-            "show_outro", "outro_duration_sec"
+            "show_outro", "outro_duration_sec", "raw_folder_path"
         }
         updates = []
         params = []
@@ -580,6 +580,19 @@ def update_channel(channel_id: int, **fields):
         params.append(channel_id)
         query = f"UPDATE channels SET {', '.join(updates)} WHERE id = ?"
         cursor.execute(query, params)
+        conn.commit()
+        return get_channel_by_id(channel_id)
+    finally:
+        conn.close()
+
+def update_channel_source_folder(channel_id: int, folder_path: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE channels SET raw_folder_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (str(folder_path), channel_id)
+        )
         conn.commit()
         return get_channel_by_id(channel_id)
     finally:

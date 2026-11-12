@@ -335,7 +335,7 @@ def process_upload_queue(limit: int = 1, headless: bool = False, channel_id: int
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        where = "status = 'METADATA_READY' AND scheduled_datetime IS NOT NULL"
+        where = "status IN ('SCHEDULED', 'METADATA_READY') AND scheduled_datetime IS NOT NULL"
         params = []
         if channel_id:
             where += " AND (channel_id = ? OR channel_id IS NULL)"
