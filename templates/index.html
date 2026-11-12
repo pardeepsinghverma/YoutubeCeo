@@ -201,180 +201,101 @@
 
 
       <!-- Navigation Links -->
-
       <nav class="flex-1 py-3 space-y-4 px-2">
-
-        <!-- Section: Channel Workspace -->
-
-        <div id="sidebar-section-channel" class="space-y-0.5">
-
-          <div class="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
-
-            <span id="nav-channel-label">Channel Workspace</span>
-
-            <span class="text-[9px] px-1 rounded bg-indigo-950 text-indigo-400 font-mono">SCOPED</span>
-
+        <!-- Section 1: Production Pipeline -->
+        <div id="sidebar-section-pipeline" class="space-y-0.5">
+          <div class="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-amber-400/90 flex items-center justify-between">
+            <span>Production Pipeline</span>
+            <span class="text-[9px] px-1.5 py-0.2 rounded bg-amber-950/80 text-amber-300 font-mono border border-amber-800/60">WORKFLOW</span>
           </div>
 
-
-
-          <button onclick="switchView('channel-dashboard')" id="nav-btn-channel-dashboard" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center gap-2.5 nav-item-active">
-
-            <i class="fa-solid fa-gauge-high w-4 text-center"></i>
-
-            <span>Mission Control</span>
-
+          <button onclick="switchView('channel-dashboard')" id="nav-btn-channel-dashboard" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center justify-between nav-item-active">
+            <div class="flex items-center gap-2.5">
+              <i class="fa-solid fa-gauge-high w-4 text-center text-amber-400"></i>
+              <span>Mission Control</span>
+            </div>
+            <span class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/80">LIVE</span>
           </button>
-
-
 
           <button onclick="switchView('channel-videos')" id="nav-btn-channel-videos" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center justify-between nav-item-inactive">
-
             <div class="flex items-center gap-2.5">
-
-              <i class="fa-solid fa-list-check w-4 text-center"></i>
-
-              <span>Video Queue</span>
-
+              <i class="fa-solid fa-clapperboard w-4 text-center text-indigo-400"></i>
+              <span>Content Studio</span>
             </div>
-
-            <span id="nav-badge-videos" class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">0</span>
-
+            <span id="nav-badge-videos" class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-300">0</span>
           </button>
 
-
-
-          <button onclick="switchView('channel-shorts')" id="nav-btn-channel-shorts" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center justify-between nav-item-inactive">
-
+          <button onclick="switchView('channel-calendar')" id="nav-btn-channel-calendar" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center justify-between nav-item-inactive">
             <div class="flex items-center gap-2.5">
-
-              <i class="fa-solid fa-bolt text-amber-400 w-4 text-center"></i>
-
-              <span>Shorts & Slicing</span>
-
+              <i class="fa-solid fa-calendar-days text-blue-400 w-4 text-center"></i>
+              <span>Publishing Calendar</span>
             </div>
-
-            <span id="nav-badge-shorts" class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-950 text-amber-400">0</span>
-
+            <span id="nav-badge-calendar-sched" class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-blue-950 text-blue-400">0</span>
           </button>
-
-
 
           <button onclick="switchView('channel-discovery')" id="nav-btn-channel-discovery" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center gap-2.5 nav-item-inactive">
-
             <i class="fa-solid fa-satellite-dish text-rose-400 w-4 text-center"></i>
-
             <span>Competitor Radar</span>
-
           </button>
-
-
-
-          <button onclick="switchView('channel-calendar')" id="nav-btn-channel-calendar" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center gap-2.5 nav-item-inactive">
-
-            <i class="fa-solid fa-calendar-days text-blue-400 w-4 text-center"></i>
-
-            <span>Publishing Calendar</span>
-
-          </button>
-
-
-
-          <button onclick="switchView('channel-branding')" id="nav-btn-channel-branding" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center gap-2.5 nav-item-inactive">
-
-            <i class="fa-solid fa-palette text-pink-400 w-4 text-center"></i>
-
-            <span>Branding & AI Art</span>
-
-          </button>
-
-
-
-          <button onclick="switchView('channel-logs')" id="nav-btn-channel-logs" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center gap-2.5 nav-item-inactive">
-
-            <i class="fa-solid fa-clock-rotate-left text-slate-400 w-4 text-center"></i>
-
-            <span>Activity & Logs</span>
-
-          </button>
-
-
-
-          <button onclick="switchView('channel-settings')" id="nav-btn-channel-settings" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center gap-2.5 nav-item-inactive">
-
-            <i class="fa-solid fa-gear text-slate-400 w-4 text-center"></i>
-
-            <span>Channel Settings</span>
-
-          </button>
-
         </div>
 
-
-
-        <!-- Section: Platform & Fleet -->
-
-        <div class="space-y-0.5 pt-2 border-t border-slate-800/80">
-
-          <div class="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-
-            Platform & Fleet
-
+        <!-- Section 2: Channel Studio -->
+        <div id="sidebar-section-channel" class="space-y-0.5 pt-2 border-t border-slate-800/80">
+          <div class="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+            <span id="nav-channel-label">Channel Studio</span>
+            <span class="text-[9px] px-1 rounded bg-slate-800 text-slate-400 font-mono">CONFIG</span>
           </div>
 
-
-
-          <button onclick="switchView('global-overview')" id="nav-btn-global-overview" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center gap-2.5 nav-item-inactive">
-
-            <i class="fa-solid fa-chart-pie text-indigo-400 w-4 text-center"></i>
-
-            <span>Fleet Overview</span>
-
+          <button onclick="switchView('channel-branding')" id="nav-btn-channel-branding" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center gap-2.5 nav-item-inactive">
+            <i class="fa-solid fa-palette text-pink-400 w-4 text-center"></i>
+            <span>Branding & AI Art</span>
           </button>
 
-
-
-          <button onclick="switchView('global-channels')" id="nav-btn-global-channels" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center justify-between nav-item-inactive">
-
-            <div class="flex items-center gap-2.5">
-
-              <i class="fa-solid fa-users-gear text-indigo-400 w-4 text-center"></i>
-
-              <span>Channels Directory</span>
-
-            </div>
-
-            <span id="nav-badge-channels-total" class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-indigo-400">2</span>
-
+          <button onclick="switchView('channel-settings')" id="nav-btn-channel-settings" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center gap-2.5 nav-item-inactive">
+            <i class="fa-solid fa-gear text-slate-400 w-4 text-center"></i>
+            <span>Channel Settings</span>
           </button>
 
-
-
-          <button onclick="switchView('global-integrations')" id="nav-btn-global-integrations" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center gap-2.5 nav-item-inactive">
-
-            <i class="fa-solid fa-plug text-sky-400 w-4 text-center"></i>
-
-            <span>Integrations & AI</span>
-
+          <button onclick="switchView('channel-logs')" id="nav-btn-channel-logs" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center gap-2.5 nav-item-inactive">
+            <i class="fa-solid fa-clock-rotate-left text-slate-400 w-4 text-center"></i>
+            <span>Live Telemetry & Logs</span>
           </button>
 
-
-
-          <button onclick="switchView('global-terminal')" id="nav-btn-global-terminal" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center gap-2.5 nav-item-inactive">
-
-            <i class="fa-solid fa-terminal text-emerald-400 w-4 text-center"></i>
-
-            <span>Terminal & Runner</span>
-
-          </button>
-
+          <!-- Compatibility hook for channel-shorts -->
+          <button onclick="openStageInContentStudio('PARTS')" id="nav-btn-channel-shorts" class="hidden"></button>
         </div>
 
+        <!-- Section 3: Platform & Fleet -->
+        <div class="space-y-0.5 pt-2 border-t border-slate-800/80">
+          <div class="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            Platform & Fleet
+          </div>
+
+          <button onclick="switchView('global-overview')" id="nav-btn-global-overview" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center gap-2.5 nav-item-inactive">
+            <i class="fa-solid fa-chart-pie text-indigo-400 w-4 text-center"></i>
+            <span>Fleet Overview</span>
+          </button>
+
+          <button onclick="switchView('global-channels')" id="nav-btn-global-channels" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center justify-between nav-item-inactive">
+            <div class="flex items-center gap-2.5">
+              <i class="fa-solid fa-users-gear text-indigo-400 w-4 text-center"></i>
+              <span>Channels Directory</span>
+            </div>
+            <span id="nav-badge-channels-total" class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-indigo-400">2</span>
+          </button>
+
+          <button onclick="switchView('global-integrations')" id="nav-btn-global-integrations" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center gap-2.5 nav-item-inactive">
+            <i class="fa-solid fa-plug text-sky-400 w-4 text-center"></i>
+            <span>Integrations & AI</span>
+          </button>
+
+          <button onclick="switchView('global-terminal')" id="nav-btn-global-terminal" class="w-full py-2 px-3 text-xs rounded-lg transition flex items-center gap-2.5 nav-item-inactive">
+            <i class="fa-solid fa-terminal text-emerald-400 w-4 text-center"></i>
+            <span>Terminal & Runner</span>
+          </button>
+        </div>
       </nav>
-
     </div>
-
-
 
     <!-- Sidebar Footer: Telemetry & Worker Status -->
 
@@ -607,6 +528,140 @@
         </div>
 
 
+
+        <!-- Live Active Worker & Studio Publishing 8-Step Stepper HUD -->
+        <div id="mission-worker-live-hud" class="hidden card p-5 border border-amber-500/50 bg-gradient-to-r from-amber-950/40 via-slate-900 to-indigo-950/40 space-y-4 rounded-2xl shadow-2xl">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <span class="w-3 h-3 rounded-full bg-amber-400 animate-pulse"></span>
+              <div>
+                <div class="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <i class="fa-solid fa-bolt-lightning text-amber-400"></i>
+                  <span>Autonomous Studio Engine Active</span>
+                </div>
+                <div id="mission-hud-task" class="text-sm font-bold text-white truncate max-w-md">Processing automation task...</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <span id="mission-hud-pct" class="font-mono text-sm font-black text-amber-400">0%</span>
+              <button onclick="stopWorker()" class="px-3 py-1.5 rounded-lg bg-rose-950 hover:bg-rose-900 text-rose-300 hover:text-white border border-rose-800 text-xs font-bold transition flex items-center gap-1.5 shadow-md cursor-pointer">
+                <i class="fa-solid fa-circle-stop"></i> Stop Worker
+              </button>
+            </div>
+          </div>
+
+          <div id="mission-hud-msg" class="text-xs text-slate-300 font-mono bg-slate-950/80 p-2.5 rounded-lg border border-slate-800/80 truncate">Initializing automation pipeline...</div>
+
+          <!-- 8-Step Studio Telemetry Stepper -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-1.5 text-[10px] font-mono text-center">
+            <div id="studio-step-1" class="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 transition flex items-center justify-center gap-1">
+              <span>1. Lock</span>
+            </div>
+            <div id="studio-step-2" class="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 transition flex items-center justify-center gap-1">
+              <span>2. Studio</span>
+            </div>
+            <div id="studio-step-3" class="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 transition flex items-center justify-center gap-1">
+              <span>3. Modal</span>
+            </div>
+            <div id="studio-step-4" class="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 transition flex items-center justify-center gap-1">
+              <span>4. Attach</span>
+            </div>
+            <div id="studio-step-5" class="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 transition flex items-center justify-center gap-1">
+              <span>5. Meta</span>
+            </div>
+            <div id="studio-step-6" class="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 transition flex items-center justify-center gap-1">
+              <span>6. Thumb</span>
+            </div>
+            <div id="studio-step-7" class="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 transition flex items-center justify-center gap-1">
+              <span>7. Sched</span>
+            </div>
+            <div id="studio-step-8" class="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 transition flex items-center justify-center gap-1">
+              <span>8. Live!</span>
+            </div>
+          </div>
+
+          <div class="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+            <div id="mission-hud-fill" class="h-full bg-gradient-to-r from-amber-500 via-rose-500 to-indigo-500 w-0 transition-all duration-300"></div>
+          </div>
+        </div>
+
+        <!-- The Interactive 5-Stage Production Pipeline Stepper -->
+        <div class="card p-5 border border-indigo-900/40 bg-gradient-to-r from-slate-900 via-indigo-950/20 to-slate-900 shadow-xl space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-indigo-400"></span>
+              <h2 class="text-xs font-bold uppercase tracking-wider text-indigo-300">Channel Production Pipeline</h2>
+            </div>
+            <span class="text-[11px] text-slate-400">Click any stage to filter & action in Content Studio &rarr;</span>
+          </div>
+
+          <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <!-- Stage 1: Raw Ingest -->
+            <div onclick="openStageInContentStudio('RAW')" class="cursor-pointer p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-amber-500/50 hover:bg-slate-800/80 transition flex flex-col justify-between group shadow-sm">
+              <div class="flex items-center justify-between text-xs text-slate-400">
+                <span class="font-bold text-slate-200 group-hover:text-amber-400">1. Raw Ingest</span>
+                <i class="fa-solid fa-film text-amber-400"></i>
+              </div>
+              <div class="text-2xl font-black text-white mt-2 font-mono" id="pipeline-count-raw">0</div>
+              <div class="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
+                <span>Needs slicing</span>
+                <span class="text-amber-400 group-hover:translate-x-0.5 transition">&rarr;</span>
+              </div>
+            </div>
+
+            <!-- Stage 2: Sliced Shorts -->
+            <div onclick="openStageInContentStudio('PARTS')" class="cursor-pointer p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-orange-500/50 hover:bg-slate-800/80 transition flex flex-col justify-between group shadow-sm">
+              <div class="flex items-center justify-between text-xs text-slate-400">
+                <span class="font-bold text-slate-200 group-hover:text-orange-400">2. Sliced Shorts</span>
+                <i class="fa-solid fa-bolt text-orange-400"></i>
+              </div>
+              <div class="text-2xl font-black text-orange-300 mt-2 font-mono" id="pipeline-count-parts">0</div>
+              <div class="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
+                <span>35s Hinglish parts</span>
+                <span class="text-orange-400 group-hover:translate-x-0.5 transition">&rarr;</span>
+              </div>
+            </div>
+
+            <!-- Stage 3: AI Packaged -->
+            <div onclick="openStageInContentStudio('PACKAGED')" class="cursor-pointer p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-purple-500/50 hover:bg-slate-800/80 transition flex flex-col justify-between group shadow-sm">
+              <div class="flex items-center justify-between text-xs text-slate-400">
+                <span class="font-bold text-slate-200 group-hover:text-purple-400">3. AI Packaged</span>
+                <i class="fa-solid fa-wand-magic-sparkles text-purple-400"></i>
+              </div>
+              <div class="text-2xl font-black text-purple-300 mt-2 font-mono" id="pipeline-count-packaged">0</div>
+              <div class="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
+                <span>SEO & 3D Art ready</span>
+                <span class="text-purple-400 group-hover:translate-x-0.5 transition">&rarr;</span>
+              </div>
+            </div>
+
+            <!-- Stage 4: Scheduled -->
+            <div onclick="openStageInContentStudio('SCHEDULED')" class="cursor-pointer p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-blue-500/50 hover:bg-slate-800/80 transition flex flex-col justify-between group shadow-sm">
+              <div class="flex items-center justify-between text-xs text-slate-400">
+                <span class="font-bold text-slate-200 group-hover:text-blue-400">4. Scheduled</span>
+                <i class="fa-solid fa-calendar-check text-blue-400"></i>
+              </div>
+              <div class="text-2xl font-black text-blue-300 mt-2 font-mono" id="pipeline-count-scheduled">0</div>
+              <div class="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
+                <span>Slotted into drops</span>
+                <span class="text-blue-400 group-hover:translate-x-0.5 transition">&rarr;</span>
+              </div>
+            </div>
+
+            <!-- Stage 5: Published Live -->
+            <div onclick="openStageInContentStudio('PUBLISHED')" class="cursor-pointer p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-emerald-500/50 hover:bg-slate-800/80 transition flex flex-col justify-between group shadow-sm">
+              <div class="flex items-center justify-between text-xs text-slate-400">
+                <span class="font-bold text-slate-200 group-hover:text-emerald-400">5. Published Live</span>
+                <i class="fa-solid fa-cloud-arrow-up text-emerald-400"></i>
+              </div>
+              <div class="text-2xl font-black text-emerald-300 mt-2 font-mono" id="pipeline-count-published">0</div>
+              <div class="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
+                <span>Monetized on YouTube</span>
+                <span class="text-emerald-400 group-hover:translate-x-0.5 transition">&rarr;</span>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <!-- The Core 4 Metric Cards (Scoped to Active Channel) -->
 
@@ -868,83 +923,78 @@
 
       <div id="view-channel-videos" class="space-y-4 hidden">
 
-        <!-- Queue Actions Control Bar -->
-
-        <div class="card p-4 flex flex-col lg:flex-row items-center justify-between gap-4">
-
-          <div class="flex items-center gap-2 w-full lg:w-auto flex-wrap">
-
-            <select id="status-filter" onchange="loadVideos()" class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-red-500">
-
-              <option value="ALL">Status: All Statuses</option>
-
-              <option value="SCANNED">Status: Scanned (Raw)</option>
-
-              <option value="METADATA_READY">Status: AI Metadata Ready</option>
-
-              <option value="SCHEDULED">Status: Scheduled</option>
-
-              <option value="PUBLISHED">Status: Published (Live)</option>
-
-              <option value="FAILED">Status: Failed</option>
-
-            </select>
-
-
-
-            <select id="type-filter" onchange="loadVideos()" class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-red-500">
-
-              <option value="ALL">Type: All Media</option>
-
-              <option value="LONG">🎬 Long-Form Only</option>
-
-              <option value="SHORTS">⚡ Shorts Only</option>
-
-              <option value="PARTS">⚡ Generated Parts</option>
-
-            </select>
-
-
-
-            <div class="relative flex-1 min-w-[200px]">
-
-              <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-500 text-xs"></i>
-
-              <input type="text" id="video-search-input" oninput="loadVideos()" placeholder="Search title or filename..." 
-
-                     class="w-full bg-slate-900 border border-slate-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-red-500">
-
+        <!-- Unified Content Studio Stage Ribbon & Action Bar -->
+        <div class="card p-4 space-y-4 border border-indigo-900/30 bg-slate-900/70 shadow-lg">
+          <!-- Top Row: Stage Navigation Tabs -->
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+            <div class="flex items-center gap-1.5 overflow-x-auto py-1">
+              <button onclick="setStageFilter('ALL')" id="stage-tab-ALL" class="px-3 py-1.5 rounded-lg text-xs font-bold transition bg-indigo-600 text-white shadow">
+                All Media (<span id="stage-count-all">0</span>)
+              </button>
+              <button onclick="setStageFilter('RAW')" id="stage-tab-RAW" class="px-3 py-1.5 rounded-lg text-xs font-medium transition bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700">
+                🎬 1. Raw Ingest (<span id="stage-count-raw">0</span>)
+              </button>
+              <button onclick="setStageFilter('PARTS')" id="stage-tab-PARTS" class="px-3 py-1.5 rounded-lg text-xs font-medium transition bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700">
+                ⚡ 2. Sliced Shorts (<span id="stage-count-parts">0</span>)
+              </button>
+              <button onclick="setStageFilter('PACKAGED')" id="stage-tab-PACKAGED" class="px-3 py-1.5 rounded-lg text-xs font-medium transition bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700">
+                ✨ 3. AI Packaged (<span id="stage-count-packaged">0</span>)
+              </button>
+              <button onclick="setStageFilter('SCHEDULED')" id="stage-tab-SCHEDULED" class="px-3 py-1.5 rounded-lg text-xs font-medium transition bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700">
+                📅 4. Scheduled (<span id="stage-count-scheduled">0</span>)
+              </button>
+              <button onclick="setStageFilter('PUBLISHED')" id="stage-tab-PUBLISHED" class="px-3 py-1.5 rounded-lg text-xs font-medium transition bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700">
+                ✅ 5. Published (<span id="stage-count-published">0</span>)
+              </button>
             </div>
 
+            <div class="flex items-center gap-2 flex-wrap">
+              <button onclick="scanFolder()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-medium transition flex items-center gap-1.5">
+                <i class="fa-solid fa-folder-open text-amber-400"></i> Scan Folder
+              </button>
+              <button onclick="generateSeoBatch()" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-purple-600/20">
+                <i class="fa-solid fa-wand-magic-sparkles"></i> AI SEO Batch
+              </button>
+              <button onclick="openScheduleModal('ALL')" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-blue-600/20">
+                <i class="fa-solid fa-calendar-days"></i> Auto-Schedule All
+              </button>
+              <button onclick="openUploadModal('ALL')" class="px-3.5 py-1.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-red-600/20">
+                <i class="fa-solid fa-cloud-arrow-up"></i> Launch Studio Uploads
+              </button>
+            </div>
           </div>
 
+          <!-- Bottom Row: Search, Type Filter, Summary -->
+          <div class="flex flex-col md:flex-row items-center justify-between gap-3">
+            <div class="flex items-center gap-2 w-full md:w-auto flex-1">
+              <div class="relative flex-1 max-w-md">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-500 text-xs"></i>
+                <input type="text" id="video-search-input" oninput="loadVideos()" placeholder="Search by title or filename..." 
+                       class="w-full bg-slate-900 border border-slate-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500">
+              </div>
 
+              <select id="type-filter" onchange="loadVideos()" class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500">
+                <option value="ALL">All Media Types</option>
+                <option value="LONG">🎬 Long-Form Only</option>
+                <option value="SHORTS">⚡ Shorts Only</option>
+                <option value="PARTS">⚡ Generated Parts</option>
+              </select>
 
-          <div class="flex items-center gap-2 w-full lg:w-auto justify-end flex-wrap">
+              <select id="status-filter" onchange="loadVideos()" class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500">
+                <option value="ALL">All Statuses</option>
+                <option value="SCANNED">Raw / Scanned</option>
+                <option value="METADATA_READY">AI Metadata Ready</option>
+                <option value="SCHEDULED">Scheduled</option>
+                <option value="PUBLISHED">Published (Live)</option>
+                <option value="FAILED">Failed</option>
+              </select>
+            </div>
 
-            <button onclick="generateSeoBatch()" class="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-medium transition shadow-md shadow-purple-600/20">
-
-              <i class="fa-solid fa-wand-magic-sparkles mr-1"></i> AI SEO Batch
-
-            </button>
-
-            <button onclick="openScheduleModal('ALL')" class="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition shadow-md shadow-blue-600/20">
-
-              <i class="fa-solid fa-calendar-days mr-1"></i> Smart Schedule
-
-            </button>
-
-            <button onclick="openUploadModal('ALL')" class="px-3.5 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-medium transition shadow-md shadow-red-600/20">
-
-              <i class="fa-solid fa-cloud-arrow-up mr-1"></i> Upload to YouTube
-
-            </button>
-
+            <div class="text-xs text-slate-400 font-mono" id="content-studio-summary-badge">
+              Active Stage: <span id="current-stage-label" class="text-indigo-400 font-bold">All Media</span>
+            </div>
           </div>
-
         </div>
-
-
 
         <!-- Video Queue Table -->
 
@@ -3944,39 +3994,98 @@ Type or select any CLI command above to execute.</pre>
 
 
 
-        // Channel-Scoped 4 KPIs in Mission Control
-
+        // Channel KPI Tiles & 5-Stage Pipeline Stepper Counters
         const stats = data.stats || {};
-
         const elInQueue = document.getElementById('kpi-in-queue');
-
         const elLong = document.getElementById('kpi-long-count');
-
         const elSched = document.getElementById('kpi-scheduled-count');
-
         const elLive = document.getElementById('kpi-published-count');
-
         const elShorts = document.getElementById('kpi-shorts-parts-count');
-
         const navVids = document.getElementById('nav-badge-videos');
-
         const navShorts = document.getElementById('nav-badge-shorts');
 
-
-
         if (elInQueue) elInQueue.innerText = (stats.total || 0);
-
         if (elLong) elLong.innerText = stats.long_form || 0;
-
         if (elSched) elSched.innerText = stats.scheduled || 0;
-
         if (elLive) elLive.innerText = stats.published || 0;
-
         if (elShorts) elShorts.innerText = stats.parts_count || 0;
-
         if (navVids) navVids.innerText = stats.total || 0;
-
         if (navShorts) navShorts.innerText = stats.parts_count || 0;
+
+        // Top 5-Stage Pipeline Stepper Counters (Mission Control)
+        const pRaw = document.getElementById('pipeline-count-raw');
+        const pParts = document.getElementById('pipeline-count-parts');
+        const pPackaged = document.getElementById('pipeline-count-packaged');
+        const pSched = document.getElementById('pipeline-count-scheduled');
+        const pPub = document.getElementById('pipeline-count-published');
+
+        if (pRaw) pRaw.innerText = stats.long_form || 0;
+        if (pParts) pParts.innerText = stats.parts_count || 0;
+        if (pPackaged) pPackaged.innerText = stats.ready_to_schedule || 0;
+        if (pSched) pSched.innerText = stats.scheduled || 0;
+        if (pPub) pPub.innerText = stats.published || 0;
+
+        // Content Studio Stage Ribbon Counters
+        const scAll = document.getElementById('stage-count-all');
+        const scRaw = document.getElementById('stage-count-raw');
+        const scParts = document.getElementById('stage-count-parts');
+        const scPackaged = document.getElementById('stage-count-packaged');
+        const scSched = document.getElementById('stage-count-scheduled');
+        const scPub = document.getElementById('stage-count-published');
+
+        if (scAll) scAll.innerText = stats.total || 0;
+        if (scRaw) scRaw.innerText = stats.long_form || 0;
+        if (scParts) scParts.innerText = stats.parts_count || 0;
+        if (scPackaged) scPackaged.innerText = stats.ready_to_schedule || 0;
+        if (scSched) scSched.innerText = stats.scheduled || 0;
+        if (scPub) scPub.innerText = stats.published || 0;
+
+        // Mission Control 8-Step Studio Publishing Telemetry Monitor
+        const mHud = document.getElementById('mission-worker-live-hud');
+        const mHudFill = document.getElementById('mission-hud-fill');
+        const mHudPct = document.getElementById('mission-hud-pct');
+        const mHudTask = document.getElementById('mission-hud-task');
+        const mHudMsg = document.getElementById('mission-hud-msg');
+
+        if (mHud && data.worker) {
+          if (data.worker.is_busy) {
+            mHud.classList.remove('hidden');
+            if (mHudFill) mHudFill.style.width = `${data.worker.progress || 0}%`;
+            if (mHudPct) mHudPct.innerText = `${data.worker.progress || 0}%`;
+            if (mHudTask) mHudTask.innerText = data.worker.current_task || 'Processing automation task...';
+            if (mHudMsg) mHudMsg.innerText = data.worker.last_message || 'In flight...';
+
+            // Telemetry step detection
+            const taskStr = (data.worker.current_task || '').toLowerCase();
+            const msgStr = (data.worker.last_message || '').toLowerCase();
+            const combined = taskStr + ' ' + msgStr;
+
+            let activeStepNum = 1;
+            if (combined.includes('publish') || combined.includes('done') || combined.includes('success')) activeStepNum = 8;
+            else if (combined.includes('schedule') || combined.includes('coppa') || combined.includes('visibility')) activeStepNum = 7;
+            else if (combined.includes('thumbnail')) activeStepNum = 6;
+            else if (combined.includes('metadata') || combined.includes('title') || combined.includes('seo') || combined.includes('tags')) activeStepNum = 5;
+            else if (combined.includes('attach') || combined.includes('upload video') || combined.includes('file')) activeStepNum = 4;
+            else if (combined.includes('modal') || combined.includes('create')) activeStepNum = 3;
+            else if (combined.includes('navigat') || combined.includes('studio') || combined.includes('login')) activeStepNum = 2;
+            else activeStepNum = 1;
+
+            for (let s = 1; s <= 8; s++) {
+              const stepEl = document.getElementById('studio-step-' + s);
+              if (stepEl) {
+                if (s === activeStepNum) {
+                  stepEl.className = "p-1.5 rounded-lg bg-indigo-950 border border-indigo-500 text-indigo-300 font-bold transition flex items-center justify-center gap-1 animate-pulse shadow";
+                } else if (s < activeStepNum) {
+                  stepEl.className = "p-1.5 rounded-lg bg-emerald-950/60 border border-emerald-800 text-emerald-400 font-medium transition flex items-center justify-center gap-1";
+                } else {
+                  stepEl.className = "p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-500 transition flex items-center justify-center gap-1";
+                }
+              }
+            }
+          } else {
+            mHud.classList.add('hidden');
+          }
+        }
 
 
 
@@ -4098,6 +4207,18 @@ Type or select any CLI command above to execute.</pre>
 
 
 
+        // Apply Production Pipeline Stage Filter
+        if (CURRENT_STAGE_FILTER === 'RAW') {
+          videos = (videos || []).filter(v => v.is_short == 0 && (v.part_number === null || v.part_number === undefined));
+        } else if (CURRENT_STAGE_FILTER === 'PARTS') {
+          videos = (videos || []).filter(v => (v.part_number !== null && v.part_number !== undefined) || v.is_short == 1);
+        } else if (CURRENT_STAGE_FILTER === 'PACKAGED') {
+          videos = (videos || []).filter(v => v.status === 'METADATA_READY');
+        } else if (CURRENT_STAGE_FILTER === 'SCHEDULED') {
+          videos = (videos || []).filter(v => v.status === 'SCHEDULED');
+        } else if (CURRENT_STAGE_FILTER === 'PUBLISHED') {
+          videos = (videos || []).filter(v => v.status === 'PUBLISHED');
+        }
         ALL_VIDEOS = videos || [];
 
         renderVideosTable(videos);
@@ -4219,113 +4340,99 @@ Type or select any CLI command above to execute.</pre>
 
 
 
+        // Build Primary Smart Action Button
+        let primaryActionBtn = '';
+        if (v.status === 'FAILED') {
+          primaryActionBtn = `
+            <button onclick="retryVideoUpload(${v.id})" class="px-2.5 py-1 rounded-lg bg-rose-950 hover:bg-rose-900 text-rose-300 hover:text-white border border-rose-700 font-bold text-xs shadow-sm transition inline-flex items-center gap-1.5 cursor-pointer">
+              <i class="fa-solid fa-rotate-right text-[10px]"></i> Retry
+            </button>
+          `;
+        } else if (v.status === 'PUBLISHED') {
+          primaryActionBtn = `
+            <span class="px-2.5 py-1 rounded-lg bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold text-xs inline-flex items-center gap-1.5">
+              <i class="fa-solid fa-circle-check text-[10px]"></i> Live ↗
+            </span>
+          `;
+        } else if (v.status === 'SCHEDULED') {
+          primaryActionBtn = `
+            <button onclick="uploadSingleVideoConfirm(${v.id}, '${safeTitle}')" class="px-2.5 py-1 rounded-lg bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold text-xs shadow-md transition inline-flex items-center gap-1.5 cursor-pointer">
+              <i class="fa-solid fa-cloud-arrow-up text-[10px]"></i> Upload Now
+            </button>
+          `;
+        } else if (v.status === 'METADATA_READY') {
+          primaryActionBtn = `
+            <button onclick="openSingleScheduleModal(${v.id}, '${v.scheduled_datetime || ''}', '${safeTitle}')" class="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-md transition inline-flex items-center gap-1.5 cursor-pointer">
+              <i class="fa-solid fa-calendar-days text-[10px]"></i> Add to Sched
+            </button>
+          `;
+        } else if (!isShort && !isPart) {
+          primaryActionBtn = `
+            <button onclick="openCutShortsModal(${v.id}, '${safeTitle}', ${v.duration_seconds || 0})" class="px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-bold text-xs shadow-md transition inline-flex items-center gap-1.5 cursor-pointer">
+              <i class="fa-solid fa-scissors text-[10px]"></i> Slice Shorts
+            </button>
+          `;
+        } else {
+          primaryActionBtn = `
+            <button onclick="generateSingleThumbnail(${v.id})" class="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md transition inline-flex items-center gap-1.5 cursor-pointer">
+              <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i> AI Package
+            </button>
+          `;
+        }
+
+        // Secondary subtle actions
+        const secondaryActions = `
+          <div class="inline-flex items-center gap-0.5">
+            ${(isShort || isPart) ? `
+              <button onclick="previewVideo(${v.id}, '${safeTitle}')" class="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-amber-400 transition" title="Watch Video">
+                <i class="fa-solid fa-play text-xs"></i>
+              </button>
+              <button onclick="sendTelegramReviewCard(${v.id})" class="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-sky-400 transition" title="Send Telegram Review Card">
+                <i class="fa-brands fa-telegram text-xs"></i>
+              </button>
+            ` : ''}
+            ${v.thumbnail_path ? `
+              <button onclick="openThumbnailPreviewModal('/api/thumbnail/${v.id}', '${safeTitle}', '${(v.thumbnail_prompt || '').replace(/'/g, "\\'")}')" class="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-purple-400 transition" title="View 3D Thumbnail">
+                <i class="fa-solid fa-image text-xs"></i>
+              </button>
+            ` : ''}
+            <button onclick="deleteVideoConfirm(${v.id}, '${safeTitle}')" class="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-rose-400 transition" title="Delete">
+              <i class="fa-solid fa-trash text-xs"></i>
+            </button>
+          </div>
+        `;
+
         return `
-
           <tr class="table-row">
-              <td class="p-3 text-center">
-                <input type="checkbox" class="video-row-check cursor-pointer rounded bg-slate-900 border-slate-700 text-indigo-600" value="${v.id}" ${SELECTED_VIDEO_IDS.has(v.id) ? 'checked' : ''} onchange="onVideoCheckChange()">
-              </td>
-              <td class="p-3 text-slate-500 font-mono">#${v.id}</td>
-
+            <td class="p-3 text-center">
+              <input type="checkbox" class="video-row-check cursor-pointer rounded bg-slate-900 border-slate-700 text-indigo-600" value="${v.id}" ${SELECTED_VIDEO_IDS.has(v.id) ? 'checked' : ''} onchange="onVideoCheckChange()">
+            </td>
+            <td class="p-3 text-slate-500 font-mono">#${v.id}</td>
             <td class="p-3">${typeBadge}</td>
-
             <td class="p-3 max-w-sm">
-
               <div class="font-medium text-slate-200 truncate" title="${safeTitle}">${v.title || v.file_name}</div>
-
               ${isPart ? `
-
                 <div class="text-[10px] text-amber-400/90 truncate mt-0.5">Part ${v.part_number} of: ${v.parent_title || v.parent_file_name || 'Long Video'}</div>
-
               ` : `
-
                 <div class="text-[10px] text-slate-500 truncate">${v.file_name}</div>
-
               `}
-
             </td>
-
             <td class="p-3 text-slate-400 font-mono">${Math.round(v.duration_seconds || 0)}s</td>
-
             <td class="p-3 text-slate-300 font-mono text-[11px] whitespace-nowrap">
-
               <button onclick="openSingleScheduleModal(${v.id}, '${v.scheduled_datetime || ''}', '${safeTitle}')" 
-
                       class="hover:bg-slate-800 px-1.5 py-0.5 rounded transition inline-flex items-center gap-1 text-slate-300 hover:text-white">
-
                 <span>${v.scheduled_datetime || '<span class="text-slate-600">Not set</span>'}</span>
-
                 <i class="fa-solid fa-pen text-[9px] text-slate-500 hover:text-amber-400"></i>
-
               </button>
-
             </td>
-
             <td class="p-3 whitespace-nowrap">${renderStatusSelect(v.id, v.status)}</td>
-
-            <td class="p-3 pr-4 text-right whitespace-nowrap space-x-1">
-                ${v.status === 'FAILED' ? `
-                  <button onclick="retryVideoUpload(${v.id})" class="text-xs px-2 py-0.5 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 hover:text-white border border-rose-700 font-bold shadow-sm inline-flex items-center gap-1 cursor-pointer" title="Retry upload">
-                    <i class="fa-solid fa-rotate-right text-[8px]"></i> Retry
-                  </button>
-                ` : ''}
-
-              ${(isShort || isPart) ? `
-
-                <button onclick="previewVideo(${v.id}, '${safeTitle}')" class="text-xs px-2 py-0.5 rounded bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-800 inline-flex items-center gap-1">
-
-                  <i class="fa-solid fa-play text-[8px]"></i> Watch
-
-                </button>
-
-                <button onclick="uploadSingleVideoConfirm(${v.id}, '${safeTitle}')" class="text-xs px-2 py-0.5 rounded bg-red-950 hover:bg-red-900 text-red-300 border border-red-800 inline-flex items-center gap-1 font-semibold">
-
-                  <i class="fa-solid fa-cloud-arrow-up text-[8px]"></i> Upload
-
-                </button>
-
-                <button onclick="sendTelegramReviewCard(${v.id})" class="text-xs px-2 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 inline-flex items-center gap-1" title="Send Telegram Card">
-
-                  <i class="fa-brands fa-telegram text-[9px]"></i> TG
-
-                </button>
-
-              ` : `
-
-                <button onclick="openCutShortsModal(${v.id}, '${safeTitle}', ${v.duration_seconds || 0})" class="text-xs px-2.5 py-0.5 rounded bg-amber-950 hover:bg-amber-900 text-amber-300 border border-amber-800 inline-flex items-center gap-1 font-bold">
-
-                  <i class="fa-solid fa-scissors text-[9px]"></i> Cut Shorts
-
-                </button>
-
-              `}
-
-              ${v.thumbnail_path ? `
-                <button onclick="openThumbnailPreviewModal('/api/thumbnail/${v.id}', '${safeTitle}', '${(v.thumbnail_prompt || '').replace(/'/g, "\\'")}')" class="text-xs text-purple-400 hover:text-purple-300 px-1" title="Preview AI Thumbnail">
-                  <i class="fa-solid fa-image text-purple-400"></i>
-                </button>
-              ` : `
-                <button onclick="generateSingleThumbnail(${v.id})" class="text-xs text-purple-400 hover:text-purple-300 px-1" title="Generate AI Thumbnail">
-                  <i class="fa-solid fa-wand-magic-sparkles"></i>
-                </button>
-              `}
-
-              <button onclick="viewSeoDetails(${idx})" class="text-xs text-blue-400 hover:text-blue-300 px-1" title="View SEO">
-
-                <i class="fa-regular fa-eye"></i>
-
-              </button>
-
-              <button onclick="deleteVideoConfirm(${v.id}, '${safeTitle}')" class="text-xs text-rose-400 hover:text-rose-300 px-1.5 py-0.5 rounded hover:bg-rose-950/60 transition" title="Delete video">
-
-                <i class="fa-solid fa-trash-can"></i>
-
-              </button>
-
+            <td class="p-3 pr-4 text-right whitespace-nowrap">
+              <div class="flex items-center justify-end gap-2">
+                ${primaryActionBtn}
+                ${secondaryActions}
+              </div>
             </td>
-
           </tr>
-
         `;
 
       }).join('');

@@ -727,14 +727,14 @@ def get_stats(channel_id=None):
         cursor.execute(f"""
         SELECT 
             COUNT(*) as total,
-            SUM(CASE WHEN is_short = 1 THEN 1 ELSE 0 END) as shorts,
-            SUM(CASE WHEN is_short = 0 THEN 1 ELSE 0 END) as long_form,
-            SUM(CASE WHEN part_number IS NOT NULL OR parent_video_id IS NOT NULL THEN 1 ELSE 0 END) as parts_count,
-            SUM(CASE WHEN status = 'SCANNED' THEN 1 ELSE 0 END) as pending_ai,
-            SUM(CASE WHEN status = 'METADATA_READY' THEN 1 ELSE 0 END) as ready_to_schedule,
-            SUM(CASE WHEN status = 'SCHEDULED' THEN 1 ELSE 0 END) as scheduled,
-            SUM(CASE WHEN status = 'PUBLISHED' THEN 1 ELSE 0 END) as published,
-            SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) as failed
+            COALESCE(SUM(CASE WHEN is_short = 1 THEN 1 ELSE 0 END), 0) as shorts,
+            COALESCE(SUM(CASE WHEN is_short = 0 THEN 1 ELSE 0 END), 0) as long_form,
+            COALESCE(SUM(CASE WHEN part_number IS NOT NULL OR parent_video_id IS NOT NULL THEN 1 ELSE 0 END), 0) as parts_count,
+            COALESCE(SUM(CASE WHEN status = 'SCANNED' THEN 1 ELSE 0 END), 0) as pending_ai,
+            COALESCE(SUM(CASE WHEN status = 'METADATA_READY' THEN 1 ELSE 0 END), 0) as ready_to_schedule,
+            COALESCE(SUM(CASE WHEN status = 'SCHEDULED' THEN 1 ELSE 0 END), 0) as scheduled,
+            COALESCE(SUM(CASE WHEN status = 'PUBLISHED' THEN 1 ELSE 0 END), 0) as published,
+            COALESCE(SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END), 0) as failed
         FROM videos
         {where}
         """, params)

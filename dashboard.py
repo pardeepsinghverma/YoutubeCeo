@@ -503,6 +503,7 @@ def api_save_telegram_config(payload: dict):
     return {"message": "Telegram HITL settings saved successfully"}
 
 @app.post("/api/telegram/test")
+@app.post("/api/telegram/test-ping")
 async def api_test_telegram():
     from db import get_telegram_config
     cfg = get_telegram_config()
